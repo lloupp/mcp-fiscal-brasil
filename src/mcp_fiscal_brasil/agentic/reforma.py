@@ -14,13 +14,13 @@ AVISOS LEGAIS:
 - Setores com reducao de aliquota (saude, educacao, cesta basica) possuem
   aliquotas diferenciadas nao modeladas aqui.
 
-Fontes consultadas para o cronograma:
-- LC 214/2025 (arts. 6, 7, 337, 343, 346)
+Fontes oficiais consultadas para o cronograma:
+- LC 214/2025
   https://www.planalto.gov.br/ccivil_03/leis/lcp/lcp214.htm
-- SimTax - Transicao ICMS/IBS 2029-2032
-  https://simtax.com.br/transicao-do-icms-para-o-ibs-como-funcionara-a-troca-de-carga-entre-2029-e-2032/
-- Cronograma Trad & Cavalcanti
-  https://www.tradecavalcanti.com.br/publicacoes/cronograma-reforma-tributaria-lei-complementar-214-2025
+- Receita Federal - Orientacoes da Reforma Tributaria para 2026
+  https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/acoes-e-programas/programas-e-atividades/reforma-tributaria-do-consumo/orientacoes-2026
+- Receita Federal - Cronograma dos documentos fiscais eletronicos (Ato Conjunto RFB/CGIBS 4/2026)
+  https://www.gov.br/receitafederal/pt-br/acesso-a-informacao/acoes-e-programas/programas-e-atividades/reforma-tributaria-do-consumo/orientacoes-da-reforma-tributaria
 """
 
 from __future__ import annotations
@@ -34,9 +34,9 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 # 2026: CBS 0,9% + IBS 0,1% - fase de teste (compensavel com PIS/COFINS,
 #        impacto liquido ~zero para o contribuinte)
-# 2027: CBS plena substitui PIS/COFINS; IPI reduzido (exceto ZFM);
-#        IBS: sem efeito sobre ICMS/ISS em 2027-2028 (reducao comeca em 2029)
-# 2028: igual 2027 (sem mudanca adicional no ICMS/ISS)
+# 2027-2028: PIS/COFINS extintos; CBS com reducao de 0,1 ponto percentual
+#        sobre a aliquota de referencia e IBS de 0,1 ponto percentual.
+#        ICMS/ISS seguem integrais; a reducao proporcional comeca em 2029.
 # 2029: IBS sobe para 10% da aliquota plena; ICMS/ISS reduzem para 90%
 # 2030: IBS 20%; ICMS/ISS 80%
 # 2031: IBS 30%; ICMS/ISS 70%
@@ -45,8 +45,10 @@ from pydantic import BaseModel, Field
 
 # Aliquotas de referencia CBS e IBS (ESTIMATIVAS - nao fixadas em lei)
 # Expostas como constantes publicas para uso externo e em testes.
-CBS_REFERENCIA_PCT = 8.8  # substitui PIS/COFINS a partir de 2027
+CBS_REFERENCIA_PCT = 8.8  # referencia estimada; 2027-2028 usa reducao de 0,1 p.p.
 IBS_REFERENCIA_PCT = 17.7  # substitui ICMS+ISS em 2033 (estimativa)
+CBS_REDUCAO_2027_2028_PCT = 0.1
+IBS_2027_2028_PCT = 0.1
 
 # Aliases privados mantidos para compatibilidade interna
 _CBS_REFERENCIA_PCT = CBS_REFERENCIA_PCT
@@ -58,7 +60,8 @@ _PIS_COFINS_PADRAO_NAO_CUMULATIVO = 9.25
 # utilizada para todos os setores do Simples Nacional pois o DAS nao decompoe PIS/COFINS.
 _PIS_COFINS_PADRAO_SIMPLES = 3.65
 
-# Fracao do ICMS/ISS que o IBS assume em cada ano de 2029-2032
+# Fracao da aliquota de referencia do IBS usada na transicao proporcional
+# de ICMS/ISS a partir de 2029. Em 2027-2028 o IBS e fixo em 0,1 p.p.
 _FRACAO_IBS_POR_ANO: dict[int, float] = {
     2026: 0.0,
     2027: 0.0,
@@ -99,9 +102,14 @@ class ResultadoAnual(BaseModel):
     )
     carga_regime_novo_pct: float = Field(
         description=(
-            "Aliquota efetiva estimada (%) da parte CBS+IBS que passa a incidir "
-            "neste ano (IBS na proporcao da transicao + CBS quando aplicavel)."
+            "Carga liquida estimada (%) atribuida a CBS+IBS apos compensacoes "
+            "especificas da transicao."
         )
+    )
+    cbs_nominal_pct: float = Field(description="Aliquota nominal de CBS modelada no ano.")
+    ibs_nominal_pct: float = Field(description="Aliquota nominal de IBS modelada no ano.")
+    compensacao_transicao_pct: float = Field(
+        description="Percentual nominal compensado no ano-teste; zero nos demais anos."
     )
     carga_total_pct: float = Field(
         description=(
@@ -198,17 +206,17 @@ def _nota_para_ano(ano: int, regime_atual: str) -> str:
             "Impacto liquido adicional proximo de zero para a maioria dos contribuintes."
         ),
         2027: (
-            "CBS plena substitui PIS e COFINS. IPI zerado (exceto ZFM). "
-            "ICMS e ISS seguem integrais. "
+            "PIS/COFINS extintos. CBS usa a referencia reduzida em 0,1 p.p. e IBS incide "
+            "a 0,1 p.p.; ICMS e ISS seguem integrais. "
             + (
-                "Simples Nacional entra no novo sistema com regras proprias (em regulamentacao)."
+                "Documentos do Simples Nacional entram no cronograma especifico de 2027."
                 if regime_atual == "Simples Nacional"
-                else "IBS ainda nao altera ICMS/ISS neste ano."
+                else "A reducao proporcional de ICMS/ISS comeca em 2029."
             )
         ),
         2028: (
-            "Ano de consolidacao da CBS. ICMS e ISS permanecem integrais. "
-            "IBS ainda nao afeta tributos estaduais/municipais."
+            "CBS segue com reducao de 0,1 p.p. e IBS a 0,1 p.p.; "
+            "ICMS e ISS permanecem integrais."
         ),
         2029: (
             "Inicio da reducao do ICMS/ISS: tributos estaduais/municipais recuam "
@@ -236,22 +244,29 @@ def _calcular_ano(
     fracao_ibs = _FRACAO_IBS_POR_ANO[ano]
     fracao_icms_iss_restante = 1.0 - fracao_ibs
 
+    compensacao_transicao_pct = 0.0
     if ano == 2026:
-        # Fase de teste: PIS/COFINS integrais, CBS 0,9% compensavel,
-        # IBS 0,1% compensavel. Carga adicional liquida ~zero.
+        # Ano-teste: CBS 0,9% + IBS 0,1%. O modelo considera compensacao
+        # integral desses 1,0 p.p. para representar a carga liquida adicional.
         carga_antiga_pct = pis_cofins_pct + icms_iss_pct
-        carga_nova_pct = 0.0  # compensado
+        cbs_nominal_pct = 0.9
+        ibs_nominal_pct = 0.1
+        compensacao_transicao_pct = cbs_nominal_pct + ibs_nominal_pct
+        carga_nova_pct = 0.0
     elif ano in (2027, 2028):
-        # CBS plena substitui PIS/COFINS; ICMS/ISS integrais; IBS ainda nao reduz ICMS/ISS
-        carga_antiga_pct = icms_iss_pct  # PIS/COFINS substituido pela CBS
-        carga_nova_pct = _CBS_REFERENCIA_PCT  # CBS plena
+        # Orientacao operacional vigente em 2026: CBS com reducao de 0,1 p.p.
+        # e IBS de 0,1 p.p.; ICMS/ISS ainda integrais.
+        carga_antiga_pct = icms_iss_pct
+        cbs_nominal_pct = _CBS_REFERENCIA_PCT - CBS_REDUCAO_2027_2028_PCT
+        ibs_nominal_pct = IBS_2027_2028_PCT
+        carga_nova_pct = cbs_nominal_pct + ibs_nominal_pct
     else:
-        # 2029-2032: ICMS/ISS decresce, IBS cresce proporcionalmente
-        # 2033: ICMS/ISS = 0, IBS = 100% da referencia
+        # 2029-2032: ICMS/ISS decresce, IBS cresce proporcionalmente.
+        # 2033: ICMS/ISS = 0 e IBS atinge a referencia plena.
         carga_antiga_pct = icms_iss_pct * fracao_icms_iss_restante
-        # IBS na proporcao + CBS plena (desde 2027)
-        ibs_parcela_pct = _IBS_REFERENCIA_PCT * fracao_ibs
-        carga_nova_pct = _CBS_REFERENCIA_PCT + ibs_parcela_pct
+        cbs_nominal_pct = _CBS_REFERENCIA_PCT
+        ibs_nominal_pct = _IBS_REFERENCIA_PCT * fracao_ibs
+        carga_nova_pct = cbs_nominal_pct + ibs_nominal_pct
 
     carga_total_pct = carga_antiga_pct + carga_nova_pct
     carga_total_reais = faturamento * carga_total_pct / 100.0
@@ -260,6 +275,9 @@ def _calcular_ano(
         ano=ano,
         carga_regime_atual_pct=round(carga_antiga_pct, 2),
         carga_regime_novo_pct=round(carga_nova_pct, 2),
+        cbs_nominal_pct=round(cbs_nominal_pct, 2),
+        ibs_nominal_pct=round(ibs_nominal_pct, 2),
+        compensacao_transicao_pct=round(compensacao_transicao_pct, 2),
         carga_total_pct=round(carga_total_pct, 2),
         carga_total_reais=round(carga_total_reais, 2),
         nota_ano=_nota_para_ano(ano, regime_atual),
@@ -288,7 +306,8 @@ def simular_transicao_reforma_tributaria(
 
     Cronograma (LC 214/2025, arts. 337, 343, 346):
     - 2026: fase de teste - CBS 0,9% + IBS 0,1%, compensavel, impacto liquido ~zero.
-    - 2027-2028: CBS plena (ref. ~8,8%) substitui PIS/COFINS; ICMS/ISS integrais.
+    - 2027-2028: PIS/COFINS extintos; CBS de referencia reduzida em 0,1 p.p.;
+      IBS de 0,1 p.p.; ICMS/ISS integrais.
     - 2029: IBS assume 10% da carga de referencia; ICMS/ISS recuam para 90%.
     - 2030: IBS 20%; ICMS/ISS 80%.
     - 2031: IBS 30%; ICMS/ISS 70%.
@@ -355,8 +374,10 @@ def simular_transicao_reforma_tributaria(
         f"({'informada pelo usuario' if (aliquota_iss_atual if setor == 'serviços' else aliquota_icms_atual) is not None else 'valor padrao assumido - varia por estado/municipio'}).",
         f"Aliquota PIS/COFINS: {pis_cofins_pct:.2f}% "
         f"({'informada pelo usuario' if aliquota_pis_cofins is not None else f'padrao para {regime_atual}'}).",
-        f"CBS de referencia (estimativa): {_CBS_REFERENCIA_PCT}% (substitui PIS/COFINS a partir de 2027).",
-        f"IBS de referencia (estimativa): {_IBS_REFERENCIA_PCT}% (aliquota plena em 2033).",
+        f"CBS de referencia (estimativa): {_CBS_REFERENCIA_PCT}%; em 2027-2028 o modelo "
+        f"aplica reducao de {CBS_REDUCAO_2027_2028_PCT} p.p.",
+        f"IBS de referencia (estimativa): {_IBS_REFERENCIA_PCT}% (aliquota plena em 2033); "
+        f"em 2027-2028 usa {IBS_2027_2028_PCT} p.p.",
         "Cronograma IBS/ICMS-ISS (LC 214/2025): 10%/90% em 2029, 20%/80% em 2030, 30%/70% em 2031, 40%/60% em 2032, 100%/0% em 2033.",
         "2026: fase de teste com compensacao; impacto liquido adicional assumido como zero.",
     ]
@@ -370,8 +391,8 @@ def simular_transicao_reforma_tributaria(
         "PIS/COFINS, ICMS e ISS estao todos embutidos no DAS e nao sao apurados separadamente. "
         "O simulador modela esses tributos como se fossem independentes, o que superestima a "
         "carga atual e distorce a comparacao com o regime novo. Optantes do Simples Nacional e "
-        "MEI entram no novo sistema a partir de 2027 com regras proprias ainda em regulamentacao "
-        "pelo CGIBS. Use os resultados como referencia de ordem de grandeza, nunca como base "
+        "MEI possuem regras proprias e cronograma especifico; em 2026 o CGSN ja publicou "
+        "adequacoes para 2027. Use os resultados como referencia de ordem de grandeza, nunca como base "
         "de decisao tributaria.",
         "AVISO - Creditos de IBS/CBS: o modelo de nao-cumulatividade (creditos) do IBS/CBS "
         "nao foi modelado nesta versao. Empresas com cadeias de credito podem ter carga "
