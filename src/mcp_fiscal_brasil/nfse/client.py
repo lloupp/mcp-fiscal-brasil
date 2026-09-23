@@ -8,13 +8,17 @@ ou levantam NFSeNacionalUnavailableError (5xx, timeout, falha de rede).
 Referência: https://www.gov.br/nfse/pt-br/biblioteca/documentacao-tecnica/apis-prod-restrita-e-producao
 """
 
+import asyncio
 import logging
+import ssl
 import time
 from typing import Any
 from urllib.parse import quote
 
 import httpx
 
+from mcp_fiscal_brasil._core import settings
+from mcp_fiscal_brasil.nfe._soap_mtls import carregar_pkcs12, criar_ssl_context_em_memoria
 from mcp_fiscal_brasil.nfse.circuit_breaker import CircuitBreaker
 
 logger = logging.getLogger(__name__)
@@ -83,7 +87,8 @@ class NFSeNacionalClient:
 
         url = f"{self._base_url}{path}"
         try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            ssl_context = await self._obter_ssl_context()
+            async with httpx.AsyncClient(verify=ssl_context, timeout=_TIMEOUT) as client:
                 response = await client.get(url)
             if response.status_code == 404:
                 # Nota nao encontrada: nao e falha de disponibilidade
