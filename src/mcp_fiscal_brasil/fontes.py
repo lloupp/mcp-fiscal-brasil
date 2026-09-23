@@ -48,7 +48,7 @@ _FONTES: tuple[FonteFiscal, ...] = (
         dominios=["nfse"],
         autenticacao="ICP-Brasil/mTLS conforme o endpoint e papel do ator.",
         uso_recomendado="Fonte primaria quando o municipio/documento participa do padrao nacional.",
-        limitacoes=["Cobertura e permissoes dependem da adesao municipal e do papel do consultante."],
+        limitacoes=[\n            "Cobertura e permissoes dependem da adesao municipal e do papel do consultante."\n        ],
     ),
     FonteFiscal(
         id="sped",
