@@ -11,6 +11,7 @@ Comportamento esperado:
 
 from __future__ import annotations
 
+import ssl
 import time
 from unittest.mock import AsyncMock, patch
 
@@ -179,7 +180,15 @@ class TestNFSeClienteComCircuitBreaker:
         """Substitui o singleton _circuit_breaker por uma instância limpa por teste."""
         from mcp_fiscal_brasil.nfse.circuit_breaker import CircuitBreaker
 
-        with patch.object(_client_module, "_circuit_breaker", CircuitBreaker()):
+        ssl_context = ssl.create_default_context()
+        with (
+            patch.object(_client_module, "_circuit_breaker", CircuitBreaker()),
+            patch.object(
+                NFSeNacionalClient,
+                "_obter_ssl_context",
+                AsyncMock(return_value=ssl_context),
+            ),
+        ):
             yield
 
     @pytest.mark.asyncio
@@ -337,7 +346,15 @@ class TestCircuitBreakerPersistenciaSingleton:
         # Circuit breaker isolado para este teste (evita contaminação do singleton global)
         cb_isolado = CircuitBreaker(failure_threshold=5, window_seconds=60, cooldown_seconds=120)
 
-        with patch.object(_client_module, "_circuit_breaker", cb_isolado):
+        ssl_context = ssl.create_default_context()
+        with (
+            patch.object(_client_module, "_circuit_breaker", cb_isolado),
+            patch.object(
+                NFSeNacionalClient,
+                "_obter_ssl_context",
+                AsyncMock(return_value=ssl_context),
+            ),
+        ):
             # Simula 5 chamadas com a ADN retornando 503
             with patch("httpx.AsyncClient") as mock_http_cls:
                 mock_http = AsyncMock()
