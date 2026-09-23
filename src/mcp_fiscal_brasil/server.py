@@ -25,8 +25,8 @@ from .agentic import (
     validate_nfe_full,
 )
 from .bcb import _tools as bcb_tools
-from .cep import _tools as cep_tools
 from .capabilities import listar_capacidades_fiscais
+from .cep import _tools as cep_tools
 from .certidoes.tools import consultar_certidao_federal, consultar_certidao_fgts
 from .cnae import _tools as cnae_tools
 
