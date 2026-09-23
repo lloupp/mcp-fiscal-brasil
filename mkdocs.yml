@@ -114,6 +114,10 @@ plugins:
 nav:
   - Inicio: index.md
   - Posicionamento: positioning.md
+  - Confiabilidade das fontes: source-reliability.md
+  - Roadmap 2026: roadmap-2026.md
+  - APURA:
+      - Integracao e limites: architecture/apura.md
   - Comece aqui:
       - Instalacao: getting-started/install.md
       - Configuracao: getting-started/config.md
