@@ -147,8 +147,7 @@ async def tool_listar_fontes_fiscais(dominio: str | None = None) -> list[dict[st
         Lista de fontes com proveniencia, nivel de confiabilidade e limitacoes.
     """
     return [
-        fonte.model_dump(mode="json", exclude_none=True)
-        for fonte in listar_fontes_fiscais(dominio)
+        fonte.model_dump(mode="json", exclude_none=True) for fonte in listar_fontes_fiscais(dominio)
     ]
 
 
