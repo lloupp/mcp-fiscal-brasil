@@ -51,8 +51,8 @@ app = FastAPI(
     title="MCP Fiscal Brasil",
     version=__version__,
     description=(
-        "API REST para integracoes fiscais brasileiras. Mesmas ferramentas do servidor "
-        "MCP, expostas via HTTP. Util para frontends, no-code e legados."
+        "API REST para integracoes fiscais brasileiras. Expoe um subconjunto seguro "
+        "das capacidades do core para frontends, no-code e sistemas legados."
     ),
 )
 
