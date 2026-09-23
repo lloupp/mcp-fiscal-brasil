@@ -13,6 +13,7 @@ from mcp_fiscal_brasil.agentic import (
     compare_tax_regimes,
     consultar_empresas_lote,
     risk_score_supplier,
+    validate_nfe_full,
 )
 from mcp_fiscal_brasil.agentic.regimes import (
     _calc_lucro_presumido,
@@ -28,6 +29,7 @@ from mcp_fiscal_brasil.agentic.schemas import (
 )
 from mcp_fiscal_brasil.cnpj.schemas import AtividadeCNAE, CNPJResponse
 from mcp_fiscal_brasil.shared.schemas import Endereco
+from mcp_fiscal_brasil.simples.schemas import SimplesStatus
 
 
 def _cnpj_ativo() -> CNPJResponse:
@@ -76,6 +78,53 @@ def _cnpj_baixado() -> CNPJResponse:
         qsa=[],
         origem="BrasilAPI",
     )
+
+
+@pytest.mark.asyncio
+async def test_validate_nfe_full_extrai_chave_do_xml_e_marca_consistente(
+    tmp_path, chave_nfe_valida: str
+) -> None:
+    xml_path = tmp_path / "nfe.xml"
+    xml_path.write_text(
+        f"""
+        <NFe>
+          <infNFe Id="NFe{chave_nfe_valida}">
+            <ide>
+              <mod>55</mod>
+              <serie>1</serie>
+              <nNF>1</nNF>
+              <dhEmi>2023-01-01T10:00:00-03:00</dhEmi>
+            </ide>
+            <emit>
+              <CNPJ>12345678000190</CNPJ>
+              <xNome>EMPRESA TESTE LTDA</xNome>
+            </emit>
+            <dest>
+              <CNPJ>33000167000101</CNPJ>
+              <xNome>CLIENTE TESTE SA</xNome>
+            </dest>
+            <total>
+              <ICMSTot>
+                <vNF>100.00</vNF>
+              </ICMSTot>
+            </total>
+          </infNFe>
+        </NFe>
+        """,
+        encoding="utf-8",
+    )
+
+    with patch("mcp_fiscal_brasil.agentic.nfe.CNPJClient") as mock_cnpj_class:
+        cnpj_inst = MagicMock()
+        cnpj_inst.consultar = AsyncMock(return_value=_cnpj_ativo())
+        mock_cnpj_class.return_value = cnpj_inst
+
+        report = await validate_nfe_full(xml_path)
+
+    assert report.chave_acesso == chave_nfe_valida
+    assert report.chave_consistente is True
+    assert report.valida_estruturalmente is True
+    assert report.issues == []
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +290,35 @@ async def test_compliance_empresa_baixada_eleva_risco() -> None:
 
 
 @pytest.mark.asyncio
+async def test_compliance_simples_data_real_nao_optante_gera_achado() -> None:
+    """Regressao: SimplesStatus real (não mockado como excecao) nao pode
+    disparar AttributeError ao acessar o campo de opcao pelo regime."""
+    with (
+        patch("mcp_fiscal_brasil.agentic.compliance.CNPJClient") as mock_cnpj_class,
+        patch("mcp_fiscal_brasil.agentic.compliance.SimplesClient") as mock_simples_class,
+        patch("mcp_fiscal_brasil.agentic.compliance.MEIClient") as mock_mei_class,
+    ):
+        cnpj_inst = MagicMock()
+        cnpj_inst.consultar = AsyncMock(return_value=_cnpj_ativo())
+        mock_cnpj_class.return_value = cnpj_inst
+
+        simples_inst = MagicMock()
+        simples_inst.get_simples_status = AsyncMock(
+            return_value=SimplesStatus(cnpj="12345678000190", simples_nacional=False, mei=False)
+        )
+        mock_simples_class.return_value = simples_inst
+
+        mei_inst = MagicMock()
+        mei_inst.get_mei_status = AsyncMock(side_effect=Exception("offline"))
+        mock_mei_class.return_value = mei_inst
+
+        report = await analyze_cnpj_compliance("12.345.678/0001-90")
+
+    assert "Simples Nacional" in report.fontes_consultadas
+    assert any(a.categoria == "regime_tributario" for a in report.achados)
+
+
+@pytest.mark.asyncio
 async def test_compliance_cnpj_invalido_levanta() -> None:
     with pytest.raises(ValueError, match="14 digitos"):
         await analyze_cnpj_compliance("123")
@@ -376,3 +454,68 @@ async def test_risk_score_supplier_empresa_baixada_recusa() -> None:
         resultado = await risk_score_supplier("98765432000100")
     assert resultado.recomendacao == "recusar"
     assert resultado.risco == "critico"
+
+
+# ---------------------------------------------------------------------------
+# Tools MCP: CNPJ invalido e barrado antes de qualquer consulta externa
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cnpj_invalido", ["123", "12345678000190", "33 000 167 0001 01"])
+async def test_tool_analyze_cnpj_compliance_rejeita_sem_consultar_clientes(
+    cnpj_invalido: str,
+) -> None:
+    with (
+        patch("mcp_fiscal_brasil.agentic.compliance.CNPJClient") as mock_cnpj_class,
+        patch("mcp_fiscal_brasil.agentic.compliance.SimplesClient") as mock_simples_class,
+        patch("mcp_fiscal_brasil.agentic.compliance.MEIClient") as mock_mei_class,
+    ):
+        with pytest.raises(ValueError, match="CNPJ inválido"):
+            await mcp_server.tool_analyze_cnpj_compliance(cnpj_invalido)
+
+    mock_cnpj_class.assert_not_called()
+    mock_simples_class.assert_not_called()
+    mock_mei_class.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cnpj_invalido", ["123", "12345678000190", "33 000 167 0001 01"])
+async def test_tool_risk_score_supplier_rejeita_sem_consultar_clientes(
+    cnpj_invalido: str,
+) -> None:
+    with (
+        patch("mcp_fiscal_brasil.agentic.compliance.CNPJClient") as mock_cnpj_class,
+        patch("mcp_fiscal_brasil.agentic.compliance.SimplesClient") as mock_simples_class,
+        patch("mcp_fiscal_brasil.agentic.compliance.MEIClient") as mock_mei_class,
+        patch("mcp_fiscal_brasil.agentic.supplier.analyze_cnpj_compliance") as mock_compliance,
+    ):
+        with pytest.raises(ValueError, match="CNPJ inválido"):
+            await mcp_server.tool_risk_score_supplier(cnpj_invalido, criterios_estritos=True)
+
+    mock_compliance.assert_not_called()
+    mock_cnpj_class.assert_not_called()
+    mock_simples_class.assert_not_called()
+    mock_mei_class.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_tool_analyze_cnpj_compliance_aceita_mascara_padrao() -> None:
+    relatorio = ComplianceReport(
+        cnpj="33000167000101",
+        razao_social="PETROLEO BRASILEIRO S A PETROBRAS",
+        situacao_cadastral="ATIVA",
+        risco_geral="baixo",
+        score=95,
+        achados=[],
+        resumo_executivo="Ok.",
+        fontes_consultadas=["BrasilAPI"],
+    )
+    with patch(
+        "mcp_fiscal_brasil.server.analyze_cnpj_compliance",
+        AsyncMock(return_value=relatorio),
+    ) as mock_tool:
+        resposta = await mcp_server.tool_analyze_cnpj_compliance("33.000.167/0001-01")
+
+    assert resposta["cnpj"] == "33000167000101"
+    mock_tool.assert_awaited_once_with("33.000.167/0001-01")

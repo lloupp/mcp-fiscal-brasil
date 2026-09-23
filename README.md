@@ -1,18 +1,19 @@
-mcp-name: io.github.DeHor-Labs/mcp-fiscal-brasil
+<!-- mcp-name: io.github.DeHor-Labs/mcp-fiscal-brasil -->
 
 <p align="center">
-  <img src="assets/banner.svg" width="800" alt="MCP Fiscal Brasil">
+  <img src="https://raw.githubusercontent.com/DeHor-Labs/mcp-fiscal-brasil/main/assets/banner.svg" width="800" alt="MCP Fiscal Brasil">
 </p>
 
 <p align="center">
-  <strong>36 ferramentas fiscais. Zero API key. Zero cadastro. 100% open source.</strong><br>
-  O primeiro MCP com suporte a Reforma Tributaria 2026 (IBS/CBS) - a camada open source para agentes de IA trabalharem com compliance fiscal brasileiro.
+  <strong>O único servidor MCP com suporte nativo a NF-e, NFS-e, SPED, eSocial, Simples Nacional e Reforma Tributária 2026 (IBS/CBS) - sem conta, sem chave e sem configuração.</strong>
 </p>
 
 <p align="center">
   <a href="https://pypi.org/project/mcp-fiscal-brasil/"><img src="https://img.shields.io/pypi/v/mcp-fiscal-brasil?color=009c3b&label=PyPI" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/mcp-fiscal-brasil/"><img src="https://img.shields.io/pypi/dm/mcp-fiscal-brasil?color=009c3b&label=downloads%2Fm%C3%AAs" alt="PyPI downloads"></a>
   <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.10%2B-002776?logo=python&logoColor=white" alt="Python 3.10+"></a>
   <a href="https://github.com/DeHor-Labs/mcp-fiscal-brasil/actions/workflows/ci.yml"><img src="https://github.com/DeHor-Labs/mcp-fiscal-brasil/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <img src="https://img.shields.io/badge/cobertura-85%25-009c3b?labelColor=002776" alt="Cobertura de testes 85%">
   <a href="LICENSE"><img src="https://img.shields.io/badge/licenca-MIT-FFDF00?labelColor=002776" alt="License MIT"></a>
   <a href="https://modelcontextprotocol.io"><img src="https://img.shields.io/badge/MCP-compatível-7c3aed" alt="MCP Compatible"></a>
   <img src="https://img.shields.io/github/stars/DeHor-Labs/mcp-fiscal-brasil?style=flat&color=009c3b" alt="Stars">
@@ -23,10 +24,57 @@ mcp-name: io.github.DeHor-Labs/mcp-fiscal-brasil
   <a href="https://dehor-labs.github.io/mcp-fiscal-brasil/">📚 Documentação</a> ·
   <a href="#-instalação">Instalação</a> ·
   <a href="#-ferramentas-disponíveis">Ferramentas</a> ·
-  <a href="#-workflows-agênticos">Workflows</a> ·
+  <a href="#workflows-que-vendem-sozinho">Workflows</a> ·
   <a href="#-roadmap">Roadmap</a> ·
   <a href="#-contribuindo">Contribuindo</a>
 </p>
+
+---
+
+## Início rápido
+
+```bash
+uvx mcp-fiscal-brasil
+```
+
+> **Para manter sempre atualizado:** `uvx` cacheia a versão instalada. Use `uvx mcp-fiscal-brasil@latest` ou `uvx --refresh mcp-fiscal-brasil` para forçar a versão mais recente do [PyPI](https://pypi.org/project/mcp-fiscal-brasil/).
+
+### Claude Desktop
+
+Edite `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) ou `%APPDATA%\Claude\claude_desktop_config.json` (Windows):
+
+```json
+{
+  "mcpServers": {
+    "fiscal-brasil": {
+      "command": "uvx",
+      "args": ["mcp-fiscal-brasil"]
+    }
+  }
+}
+```
+
+Reinicie o Claude Desktop. As ferramentas fiscais aparecem automaticamente, sem nenhuma chave de API.
+
+---
+
+## Por que mcp-fiscal-brasil e não outros servidores MCP brasileiros?
+
+| Funcionalidade | mcp-fiscal-brasil | mcp-brasil | brasil-data-mcp |
+|---|:---:|:---:|:---:|
+| Foco | Vertical fiscal profunda | Dados públicos gerais | Dados públicos gerais |
+| NF-e: parse, validação, DANFE, assinatura | Sim | Não | Não |
+| SPED/eSocial: análise offline | Sim | Não | Não |
+| Tabelas offline (NCM, CFOP, CNAE) | Sim | Não | Não |
+| Reforma Tributária 2026 (IBS/CBS) | Sim | Não | Não |
+| Simples Nacional/MEI | Sim | Não | Não |
+| Certidão federal/FGTS | Sim (orientação) | Não | Não |
+| Certificado A1 (mTLS SEFAZ) | Sim (opt-in) | Não | Não |
+| Zero-cadastro, zero chave obrigatória | Sim | Parcial (3 APIs exigem chave) | Sim |
+| Tools agênticas de alto nível | Sim (6 tools) | Parcial | Não |
+| Linguagem de implementação | Python | Python | Node.js |
+
+**mcp-brasil** (1.6k stars) e **brasil-data-mcp** cobrem dados públicos gerais - CEP, bancos, feriados, economia. Este projeto faz algo diferente: é uma vertical fiscal, com parsing offline de XML, validação XSD, tabelas de referência embutidas e suporte à Reforma 2026. Focos diferentes, públicos distintos.
 
 ---
 
@@ -162,11 +210,17 @@ Funcionam 100% sem chaves de API. Instale e use imediatamente.
 
 | Módulo | Ferramenta | Descrição | API |
 |--------|-----------|-----------|-----|
-| CNPJ | `consultar_cnpj` | Dados completos: razão social, sócios, CNAE, endereço | BrasilAPI (grátis) |
+| CNPJ | `consultar_cnpj` | Dados completos: razão social, sócios, CNAE, endereço | BrasilAPI (grátis) + cpfcnpj.com.br (premium, opt-in) |
 | CNPJ | `consultar_simples_nacional` | Optante Simples/MEI com datas de entrada e exclusão | BrasilAPI (grátis) |
 | NFe | `validar_chave_nfe` | Valida dígito + extrai UF, CNPJ, data, número | Offline |
-| NFe | `consultar_status_sefaz` | Status do webservice SEFAZ por estado | BrasilAPI (grátis) |
-| NFe | `consultar_nfe` | Consulta NFe completa pela chave de 44 dígitos | BrasilAPI (grátis) |
+| NFe | `consultar_nfe` | Consulta NFe completa pela chave de 44 dígitos | BrasilAPI (grátis) + cpfcnpj.com.br (premium, opt-in) |
+| NFe | `consultar_nfce` | NFC-e (modelo 65) pela chave de 44 dígitos; consulta completa exige token (pacote 102), senão tenta fontes públicas com dados parciais | cpfcnpj.com.br (pacote 102) + fontes públicas (parcial) |
+| NFe | `parse_nfe_xml` | Parseia XML bruto de NF-e/NFC-e e retorna dados estruturados | Offline |
+| NFe | `gerar_danfe` | Gera DANFE PDF (A4) a partir do XML de NF-e (mod 55) | Offline |
+| NFe | `validar_assinatura_nfe` | Valida assinatura XMLDSig e extrai dados do certificado | Offline |
+| NFe | `consultar_status_sefaz` | Status real do webservice SEFAZ por estado via NfeStatusServico4 (requer cert A1) | SEFAZ (mTLS) |
+| NFe | `baixar_nfe_distribuicao` | Baixa documentos via NFeDistribuicaoDFe (requer cert A1 local) | SEFAZ (mTLS) |
+| NFe | `manifestar_nfe` | Manifesta destinatario em NF-e via NFeRecepcaoEvento (requer cert A1) | SEFAZ (mTLS) |
 | CPF | `validar_cpf` | Validação de dígito verificador | Offline |
 | SPED | `analisar_sped` | Analisa arquivo EFD/ECD/ECF: período, empresa, erros | Offline |
 | SPED | `listar_registros_sped` | Filtra registros por tipo (C100, E110, etc.) | Offline |
@@ -184,6 +238,98 @@ Retornam URLs e instruções - exigem ação manual nos portais governamentais.
 | NFSe | `consultar_nfse` | URL do portal NFSe do município + sistema utilizado |
 | Certidões | `consultar_certidao_federal` | URL do e-CAC para emissão de CND federal |
 | Certidões | `consultar_certidao_fgts` | URL do portal Caixa para consulta do CRF |
+
+---
+
+### 🔐 Ferramentas com Certificado A1 (opt-in)
+
+As tools `baixar_nfe_distribuicao`, `manifestar_nfe` e `consultar_status_sefaz`
+requerem um certificado digital A1 (`.pfx`/`.p12`). mTLS é exigência de
+transporte de todo webservice SEFAZ, inclusive a consulta de status - não há
+como consultar o status real sem certificado.
+
+- O certificado e a senha **nunca são enviados a nenhum servidor externo**.
+- A autenticação mTLS e a assinatura XMLDSig são feitas localmente.
+- `baixar_nfe_distribuicao` e `manifestar_nfe` recebem o caminho do certificado
+  como parâmetro da própria tool (`.pfx`/`.p12` local).
+- `consultar_status_sefaz` (via servidor MCP/API REST) usa o certificado
+  configurado nas variáveis de ambiente abaixo, e se conecta ao webservice
+  próprio da UF consultada ou ao ambiente virtual (SVRS/SVAN) quando a UF não
+  tem infraestrutura própria.
+- As demais tools (parse, DANFE, assinatura, consultas de CNPJ/NFe via
+  BrasilAPI) funcionam sem certificado.
+
+**Configuração** (variáveis em `.env` ou secret do provedor de deploy - ver
+`.env.example`):
+
+| Variável | Descrição |
+|----------|-----------|
+| `NFE_CERTIFICADO_PATH` | Caminho absoluto do `.pfx`/`.p12` montado no container |
+| `NFE_CERTIFICADO_SENHA` | Senha do certificado (sempre via gestor de segredos, nunca em `.env` versionado) |
+| `NFE_EMITENTE_CNPJ` | CNPJ do titular do certificado (14 dígitos, opcional) |
+| `NFE_AMBIENTE` | `producao` ou `homologacao` (padrão `producao`) |
+
+Sem `NFE_CERTIFICADO_PATH`/`NFE_CERTIFICADO_SENHA`, `consultar_status_sefaz`
+levanta `FiscalConfigurationError` e o endpoint HTTP `GET /v1/nfe/status-sefaz`
+responde 503 - o chamador deve tratar isso como "sem certificado configurado",
+não como SEFAZ fora do ar (falha pontual de rede em uma UF especifica, essa
+sim, degrada omitindo a UF em vez de derrubar a chamada). `GET
+/v1/fiscal/certificado/status` informa apenas se há certificado configurado e
+válido (sem titular nem CNPJ - endpoint sem autenticação, não deve permitir
+reconhecimento de identidade), sem nunca expor o arquivo ou a senha.
+
+---
+
+### ☁️ Provedor premium opcional: cpfcnpj.com.br (opt-in)
+
+O projeto continua **gratuito, sem cadastro e sem chave de API por padrão**. Para
+quem precisa de cobertura e atualidade de nível empresarial, a
+[cpfcnpj.com.br](https://www.cpfcnpj.com.br/dev/) pode ser habilitada como uma
+fonte premium **opt-in**, sem alterar em nada o comportamento gratuito padrão.
+
+Enquanto o token não é configurado, tudo funciona como antes, usando apenas as
+fontes gratuitas (BrasilAPI, ReceitaWS e Portal NFe). Ao definir `CPFCNPJ_TOKEN`,
+o provedor passa a ser consultado **primeiro**, e as fontes gratuitas seguem como
+fallback automático, de forma transparente.
+
+**O que a fonte premium acrescenta a este projeto fiscal:**
+
+- **Dados oficiais em tempo real (D+0):** cadastro atualizado direto na origem,
+  sem depender de janelas de sincronização de bases intermediárias.
+- **Sem bases vazadas ou raspadas:** os dados vêm de fontes oficiais, com
+  procedência conhecida, e não de dumps de terceiros.
+- **Conformidade com certificações internacionais** (ISO/IEC 27001 de segurança
+  da informação, ISO/IEC 27701 de privacidade e ISO 37301 de gestão de
+  conformidade), reforçando privacidade e tratamento adequado dos dados.
+- **Cobre a consulta de NF-e por chave**, que hoje depende de fontes públicas
+  instáveis, e adiciona **NFC-e (modelo 65)**, ainda não coberta pelas APIs
+  gratuitas.
+
+**Ferramentas cobertas quando o token está ativo:**
+
+| Ferramenta | Fonte premium | Pacote | Documentação |
+|-----------|---------------|--------|--------------|
+| `consultar_cnpj` | cpfcnpj.com.br | 5 ou 6 | [dev/](https://www.cpfcnpj.com.br/dev/) |
+| `consultar_nfe` | cpfcnpj.com.br | 100 (modelo 55) | [#op-get-token-100-chave](https://www.cpfcnpj.com.br/dev/#op-get-token-100-chave) |
+| `consultar_nfce` | cpfcnpj.com.br | 102 (modelo 65) | [#op-get-token-102-chave](https://www.cpfcnpj.com.br/dev/#op-get-token-102-chave) |
+
+O `consultar_nfce` retorna a NFC-e completa apenas com o token configurado (pacote
+102). Sem token, ele recorre às fontes públicas e pode devolver dados parciais da
+chave. A cobertura on-line do pacote 102 está disponível em São Paulo (SP) e Minas
+Gerais (MG); as demais UFs exigem habilitação sob demanda e podem retornar o erro
+204 (sem consumo de crédito). Detalhes de cobertura em
+[cpfcnpj.com.br/dev/](https://www.cpfcnpj.com.br/dev/).
+
+**Configuração** (todas opcionais, ver `.env.example`):
+
+| Variável | Descrição | Padrão |
+|----------|-----------|--------|
+| `CPFCNPJ_TOKEN` | Token da conta em cpfcnpj.com.br. **Vazio = fonte premium desligada.** | (vazio) |
+| `CPFCNPJ_BASE_URL` | URL base da API premium. Aceita somente `https://` (o token trafega no caminho da URL) | `https://api.cpfcnpj.com.br` |
+| `CPFCNPJ_CNPJ_PACKET` | Pacote de CNPJ: `5` (enxuto) ou `6` (completo) | `6` |
+
+Trate o token como segredo: use o gestor de segredos do seu provedor de deploy,
+nunca um `.env` versionado em produção.
 
 ---
 
@@ -206,6 +352,8 @@ uvx mcp-fiscal-brasil
 ```
 
 > **O que é `uvx`?** É o gerenciador de ferramentas do [uv](https://docs.astral.sh/uv/), que baixa e executa pacotes Python em ambiente isolado, sem poluir seu sistema. Se ainda não tem o uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+> **Mantendo atualizado via PyPI:** use `uvx mcp-fiscal-brasil@latest` ou `uvx --refresh mcp-fiscal-brasil` para forçar a versão mais recente. O `uvx` cacheia localmente, então sem `@latest` você pode continuar numa versão antiga.
 
 ---
 
@@ -309,6 +457,9 @@ Todas as variáveis são opcionais. O servidor funciona sem nenhuma configuraç�
 | `MCP_FISCAL_LOG_LEVEL` | Nível de log: `DEBUG`, `INFO`, `WARNING` | `INFO` |
 | `BRASILAPI_BASE_URL` | URL base da BrasilAPI (para ambientes customizados) | `https://brasilapi.com.br/api` |
 | `HTTP_TIMEOUT` | Timeout em segundos para chamadas HTTP | `30` |
+| `CPFCNPJ_TOKEN` | Token do provedor premium opt-in [cpfcnpj.com.br](https://www.cpfcnpj.com.br/dev/). Vazio = desligado (padrão gratuito intacto) | (vazio) |
+| `CPFCNPJ_BASE_URL` | URL base da API premium cpfcnpj.com.br. Aceita somente `https://` | `https://api.cpfcnpj.com.br` |
+| `CPFCNPJ_CNPJ_PACKET` | Pacote de CNPJ na cpfcnpj.com.br: `5` ou `6` | `6` |
 
 ---
 
@@ -455,11 +606,34 @@ ReceitaWS       estaduais municipais Federal  local   local  governamentais
 
 ## 📍 Roadmap
 
-- [x] **v0.1.x** - Consultas CNPJ, CPF, NFe, Simples, SPED
-- [x] **v0.2.x** - CLI, REST API, Web UI demo, wrapper Node.js em preview e tools agênticas
-- [ ] **v0.3.x** - Lote de empresas, cache persistente, mais fontes públicas e relatórios exportáveis
-- [ ] **v0.4.x** - NFSe por provedor/município, validação XSD NFe/SPED e eSocial versionado
-- [ ] **v1.0.0** - Suite fiscal com LGPD audit, contratos de API estáveis e cobertura operacional ampliada
+- [x] **v0.1.x** - Consultas CNPJ, CPF, NFe, Simples Nacional e SPED; ~14 tools MCP
+- [x] **v0.2.x** - Infra production-grade (_core), CLI, REST API, Web UI demo, wrapper npm/Node.js e tools agênticas (compliance, due diligence, comparativo de regimes); ~20 tools MCP
+- [x] **v0.3.x** - Tabelas fiscais offline (NCM/TIPI, CFOP, CST, CEST, ICMS interestadual) e indexadores BCB (Selic, IPCA, PTAX, correção monetária); ~36 tools MCP
+- [x] **v0.4.x** - Módulo NF-e completo (parse, DANFE, assinatura XMLDSig, distribuição mTLS, manifestação do destinatário) e simulador da Reforma Tributária IBS/CBS (LC 214/2025); ~42 tools MCP
+- [x] **v0.5.x** - Módulo de importação (II, IPI, PIS/COFINS-importação, ICMS grossed-up, AFRMM, Siscomex) por NCM; circuit breaker NFS-e; correções SPED e path injection; automação de release; ~44 tools MCP
+- [ ] **v0.6.x** - NFC-e modelo 65 (DANFE cupom, autorizacao e cancelamento); NFS-e por provedor/municipio; validação XSD completa NF-e e SPED
+- [ ] **v0.7.x** - eSocial versionado (S-1.1); cache persistente entre sessões; LGPD audit trail
+- [ ] **v1.0.0** - Suíte fiscal com contratos de API estáveis, cobertura operacional ampliada e SLA de manutenção documentado
+
+---
+
+## Como acompanhar
+
+[![GitHub Discussions](https://img.shields.io/github/discussions/DeHor-Labs/mcp-fiscal-brasil)](https://github.com/DeHor-Labs/mcp-fiscal-brasil/discussions)
+[![GitHub Stars](https://img.shields.io/github/stars/DeHor-Labs/mcp-fiscal-brasil)](https://github.com/DeHor-Labs/mcp-fiscal-brasil/stargazers)
+
+<a href="https://star-history.com/#DeHor-Labs/mcp-fiscal-brasil&Date">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=DeHor-Labs/mcp-fiscal-brasil&type=Date&theme=dark" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=DeHor-Labs/mcp-fiscal-brasil&type=Date" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=DeHor-Labs/mcp-fiscal-brasil&type=Date" />
+ </picture>
+</a>
+
+- **Releases**: clique em **Watch -> Releases** no topo do repositório para ser notificado a cada versão nova
+- **Discussions**: [github.com/DeHor-Labs/mcp-fiscal-brasil/discussions](https://github.com/DeHor-Labs/mcp-fiscal-brasil/discussions) - canal para sugestões de feature, dúvidas fiscais e técnicas, e casos de uso. Sugestões feitas aqui entram no roadmap de verdade
+- **Newsletter**: acompanhe os releases comentados na [LinkedIn Newsletter MCP Fiscal Brasil](https://www.linkedin.com/newsletters/7474668338875494400/) - cada edição explica o que chegou, o que foi corrigido e o que vem por ai. [Assinar agora](https://www.linkedin.com/build-relation/newsletter-follow?entityUrn=7474668338875494400)
+- **Issues**: bugs com contexto completo (versão, XML de exemplo sem dados reais, comportamento esperado vs. obtido)
 
 ---
 
@@ -480,9 +654,11 @@ pre-commit install
 git checkout -b feature/meu-recurso
 
 # 4. Implemente, teste e verifique
-pytest
-ruff check src/
+python scripts/check_release_metadata.py
+ruff check src/ tests/
+ruff format --check src/ tests/
 mypy src/
+pytest
 
 # 5. Abra um Pull Request
 ```

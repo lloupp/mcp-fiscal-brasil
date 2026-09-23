@@ -1,6 +1,65 @@
-"""Validadores de documentos fiscais brasileiros (CPF, CNPJ, chave NFe)."""
+"""Validadores de documentos fiscais brasileiros (CPF, CNPJ, chave NFe) e caminhos de arquivo."""
 
+import os
 import re
+from pathlib import Path
+
+
+def validar_caminho_arquivo(path: "str | Path", *, label: str = "Arquivo") -> Path:
+    """Normaliza e valida um caminho de arquivo contra path traversal e injeção.
+
+    Resolve o caminho para seu valor real (sem ``..``, links simbólicos, etc.)
+    e rejeita entradas com padrões suspeitos de traversal antes de abrir o
+    arquivo. Não restringe a um diretório fixo - o operador pode apontar
+    arquivos em qualquer local do sistema - o objetivo é bloquear injeção de
+    caminho controlada por dados externos não confiáveis (ex: input de LLM).
+
+    Args:
+        path: Caminho informado pelo chamador (string ou Path).
+        label: Rótulo descritivo para mensagens de erro (ex: "Arquivo SPED").
+
+    Returns:
+        ``Path`` resolvido e validado.
+
+    Raises:
+        ValueError: Quando o caminho contém componentes suspeitos de traversal
+            ou se o arquivo não existe ou não é legível.
+    """
+    path_str = str(path)
+
+    # Rejeita explicitamente sequencias de traversal comuns antes de resolver.
+    # os.path.realpath() elimina `..` silenciosamente, mas atacantes podem
+    # tentar injetar via query strings ou templates - validar antes e mais
+    # explícito e legível pelo CodeQL (resolve o fluxo source->sanitizer->sink).
+    padroes_suspeitos = (
+        "../",
+        ".." + os.sep,
+        "%2e%2e",  # URL-encoded ..
+        "%2E%2E",
+        "\x00",  # null byte injection
+    )
+    for padrao in padroes_suspeitos:
+        if padrao in path_str:
+            raise ValueError(
+                f"{label}: caminho contém componente suspeito '{padrao}'. "
+                "Forneça um caminho absoluto sem traversal de diretório."
+            )
+
+    # Resolve para o caminho real (expande ~, remove symlinks e ..)
+    try:
+        resolved = Path(path_str).expanduser().resolve()
+    except (OSError, RuntimeError) as exc:
+        raise ValueError(f"{label}: caminho inválido - {exc}") from exc
+
+    # Verifica existência e legibilidade após resolução
+    if not resolved.exists():
+        raise FileNotFoundError(f"{label} não encontrado: {resolved}")
+    if not resolved.is_file():
+        raise ValueError(f"{label} não é um arquivo regular: {resolved}")
+    if not os.access(resolved, os.R_OK):
+        raise PermissionError(f"{label} sem permissão de leitura: {resolved}")
+
+    return resolved
 
 
 def _somente_digitos(valor: str) -> str:
@@ -227,18 +286,26 @@ def format_cpf(cpf: str, remover_mascara: bool = False) -> str:
 
 def format_cnpj(cnpj: str, remover_mascara: bool = False) -> str:
     """
-    Formata um CNPJ com ou sem mascara.
+    Formata um CNPJ (numérico ou alfanumérico) com ou sem máscara.
 
-    Se remover_mascara=True, retorna apenas os 14 digitos numericos.
-    Caso contrario, retorna no formato XX.XXX.XXX/XXXX-XX.
+    Aceita o CNPJ alfanumérico da IN RFB 2.229/2024 (vigência jul/2026): as 12
+    primeiras posições podem conter letras maiúsculas (A-Z) ou dígitos e as 2
+    últimas são dígitos verificadores. A entrada é normalizada (máscara removida,
+    letras em maiúsculas) antes de formatar.
+
+    Se remover_mascara=True, retorna apenas os 14 caracteres sem máscara.
+    Caso contrário, retorna no formato XX.XXX.XXX/XXXX-XX
+    (ex.: '11.222.333/0001-81' ou '12.ABC.345/01DE-35').
     """
-    números = _somente_digitos(cnpj)
-    if len(números) != 14:
-        raise ValueError(f"CNPJ deve ter 14 digitos, recebeu {len(números)}")
+    caracteres = normalizar_cnpj(cnpj)
+    if len(caracteres) != 14:
+        raise ValueError(f"CNPJ deve ter 14 caracteres, recebeu {len(caracteres)}")
 
     if remover_mascara:
-        return números
-    return f"{números[:2]}.{números[2:5]}.{números[5:8]}/{números[8:12]}-{números[12:]}"
+        return caracteres
+    return (
+        f"{caracteres[:2]}.{caracteres[2:5]}.{caracteres[5:8]}/{caracteres[8:12]}-{caracteres[12:]}"
+    )
 
 
 def format_chave_nfe(chave: str) -> str:

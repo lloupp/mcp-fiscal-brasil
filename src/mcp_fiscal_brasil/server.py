@@ -5,20 +5,27 @@ Registra todas as ferramentas fiscais e expõe via protocolo MCP (Model Context 
 """
 
 import logging
-from typing import Any
+import unicodedata
+from pathlib import Path
+from typing import Any, Literal
 
 from fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import JSONResponse
 
 from . import __version__
+from ._core.config import settings
 from .agentic import (
     analyze_cnpj_compliance,
     compare_tax_regimes,
     consultar_empresas_lote,
     risk_score_supplier,
+    simular_transicao_reforma_tributaria,
     summarize_sped,
     validate_nfe_full,
 )
 from .bcb import _tools as bcb_tools
+from .capabilities import listar_capacidades_fiscais
 from .cep import _tools as cep_tools
 from .certidoes.tools import consultar_certidao_federal, consultar_certidao_fgts
 from .cnae import _tools as cnae_tools
@@ -28,9 +35,25 @@ from .cnpj.tools import consultar_cnpj, listar_cnpjs_por_nome
 from .cpf.tools import validar_cpf_tool
 from .empresa import _tools as empresa_tools
 from .esocial.tools import listar_eventos_esocial, validar_evento_esocial
+from .fontes import listar_fontes_fiscais
 from .ibge import _tools as ibge_tools
+from .importacao import _tools as importacao_tools
 from .mei import _tools as mei_tools
-from .nfe.tools import consultar_nfe, consultar_status_sefaz, validar_chave_nfe
+from .nfe.assinatura import AssinaturaResult, validar_assinatura_nfe
+from .nfe.danfe import DanfeResult, gerar_danfe
+from .nfe.distribuicao import (
+    DistribuicaoResult,
+    ManifestacaoResult,
+    baixar_nfe_distribuicao,
+    manifestar_nfe,
+)
+from .nfe.documento import parse_nfe_documento
+from .nfe.tools import (
+    consultar_nfce,
+    consultar_nfe,
+    consultar_status_sefaz,
+    validar_chave_nfe,
+)
 from .nfse.tools import consultar_nfse
 from .shared.validators import normalizar_cnpj, validate_cnpj_qualquer
 from .simples.tools import consultar_simples_nacional
@@ -41,6 +64,54 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 MAX_CNPJS_POR_LOTE = 50
+
+
+def _validated_local_file(path_value: str, *, label: str) -> Path:
+    """Restringe leitura de arquivos ao diretório explicitamente permitido."""
+    base_dir = Path(settings.mcp_fiscal_file_base_dir).expanduser().resolve()
+    file_path = Path(path_value).expanduser().resolve()
+
+    try:
+        file_path.relative_to(base_dir)
+    except ValueError as exc:
+        raise ValueError(f"{label} fora do diretório permitido: {base_dir}") from exc
+
+    if not file_path.exists():
+        raise ValueError(f"{label} não encontrado")
+    if not file_path.is_file():
+        raise ValueError(f"{label} não é um arquivo")
+    return file_path
+
+
+def _nfe_credentials_from_settings() -> tuple[str, str]:
+    """Obtém A1 apenas de configuração do processo, nunca de argumentos da tool."""
+    caminho = settings.nfe_certificado_path.strip()
+    senha = settings.nfe_certificado_senha
+    if not caminho or not senha:
+        raise ValueError(
+            "Certificado NF-e não configurado. Defina NFE_CERTIFICADO_PATH e "
+            "NFE_CERTIFICADO_SENHA no ambiente/secret do servidor."
+        )
+
+    cert_path = Path(caminho).expanduser().resolve()
+    if not cert_path.is_file():
+        raise ValueError("NFE_CERTIFICADO_PATH não aponta para um arquivo")
+    if cert_path.suffix.lower() not in {".pfx", ".p12"}:
+        raise ValueError("NFE_CERTIFICADO_PATH deve apontar para um arquivo .pfx ou .p12")
+    return str(cert_path), senha
+
+
+def _validar_cnpj_ou_erro(cnpj: str) -> None:
+    """Rejeita CNPJ com dígito verificador inválido antes de qualquer consulta externa.
+
+    Evita que as tools agenticas disparem consultas (Receita, Simples, MEI) para
+    um valor que nunca poderia existir.
+    """
+    if not validate_cnpj_qualquer(cnpj):
+        raise ValueError(
+            f"CNPJ inválido: {cnpj}. Verifique o formato e o dígito verificador "
+            "(numérico ou alfanumérico, com ou sem máscara)."
+        )
 
 
 def _normalizar_e_validar_cnpjs(cnpjs: list[str]) -> list[str]:
@@ -78,6 +149,64 @@ app = FastMCP(
     ),
 )
 
+
+@app.custom_route("/health", methods=["GET"], include_in_schema=False)
+async def health(_request: Request) -> JSONResponse:
+    """Healthcheck HTTP para os transportes http/sse (FastMCP so expoe /mcp por padrao).
+
+    Consumido por scripts/docker_healthcheck.py quando o container roda em
+    modo --transport http/sse. No modo stdio (padrao), essa rota nunca e
+    montada, e o healthcheck do container degrada para "pacote importa".
+    """
+    return JSONResponse({"status": "ok"})
+
+
+# ---------------------------------------------------------------------------
+# Proveniencia das fontes
+# ---------------------------------------------------------------------------
+
+
+@app.tool(
+    name="listar_fontes_fiscais",
+    description=(
+        "Lista as fontes de dados usadas ou suportadas pelo MCP Fiscal Brasil, com tipo "
+        "(oficial, agregador, privada ou local), nivel de confiabilidade, autenticacao, "
+        "dominios cobertos e limitacoes. Use antes de um workflow quando o agente precisa "
+        "decidir se uma evidencia e autoritativa ou apenas operacional."
+    ),
+)
+async def tool_listar_fontes_fiscais(dominio: str | None = None) -> list[dict[str, Any]]:
+    """Retorna o catalogo de proveniencia das fontes fiscais.
+
+    Args:
+        dominio: Filtro opcional, por exemplo "nfe", "cnpj", "sped" ou "simples".
+
+    Returns:
+        Lista de fontes com proveniencia, nivel de confiabilidade e limitacoes.
+    """
+    return [
+        fonte.model_dump(mode="json", exclude_none=True) for fonte in listar_fontes_fiscais(dominio)
+    ]
+
+
+# ---------------------------------------------------------------------------
+# Capabilities do runtime
+# ---------------------------------------------------------------------------
+
+
+@app.tool(
+    name="listar_capacidades_fiscais",
+    description=(
+        "Informa quais capacidades fiscais estão habilitadas nesta instalação sem revelar "
+        "tokens, senhas ou caminhos locais. Use antes de workflows que dependem de A1, "
+        "NFS-e nacional ou provider privado para escolher o fallback correto."
+    ),
+)
+async def tool_listar_capacidades_fiscais() -> dict[str, Any]:
+    """Retorna capabilities do runtime sem dados sensíveis."""
+    return listar_capacidades_fiscais().model_dump(mode="json", exclude_none=True)
+
+
 # ---------------------------------------------------------------------------
 # CNPJ
 # ---------------------------------------------------------------------------
@@ -89,7 +218,8 @@ app = FastMCP(
         "Consulta os dados cadastrais completos de uma empresa pelo CNPJ. "
         "Retorna razão social, endereço, atividades econômicas (CNAE), "
         "sócios (QSA), situação cadastral e porte da empresa. "
-        "Aceita CNPJ com ou sem formatação (pontos, barra, traço)."
+        "Aceita CNPJ numérico ou alfanumérico (IN RFB 2.229/2024), "
+        "com ou sem formatação (pontos, barra, traço)."
     ),
 )
 async def tool_consultar_cnpj(cnpj: str) -> dict[str, Any]:
@@ -101,7 +231,8 @@ async def tool_consultar_cnpj(cnpj: str) -> dict[str, Any]:
     Util para identificar empresas, validar fornecedores/clientes e preencher dados fiscais.
 
     Args:
-        cnpj: Numero do CNPJ com 14 digitos, com ou sem formatacao
+        cnpj: Numero do CNPJ com 14 caracteres (numerico ou alfanumerico, IN RFB 2.229/2024),
+            com ou sem formatacao
             (ex.: "11.222.333/0001-81" ou "11222333000181").
 
     Returns:
@@ -198,6 +329,31 @@ async def tool_consultar_nfe(chave_acesso: str) -> dict[str, Any]:
 
 
 @app.tool(
+    name="consultar_nfce",
+    description=(
+        "Consulta os dados de uma Nota Fiscal de Consumidor Eletrônica (NFC-e, modelo 65) "
+        "pela chave de acesso de 44 dígitos. A NFC-e é a nota do varejo ao consumidor final. "
+        "A cobertura completa depende do provedor premium opcional cpfcnpj.com.br (pacote 102), "
+        "habilitado por token; sem token, use a NF-e (modelo 55) em consultar_nfe."
+    ),
+)
+async def tool_consultar_nfce(chave_acesso: str) -> dict[str, Any]:
+    """Consulta uma NFC-e (Nota Fiscal de Consumidor Eletronica, modelo 65) pela chave de acesso.
+
+    Recupera emitente, destinatario e totais no mesmo layout da NF-e. A cobertura depende do
+    provedor premium opcional cpfcnpj.com.br (pacote 102), habilitado por token.
+
+    Args:
+        chave_acesso: Chave de acesso da NFC-e com 44 digitos (aceita com ou sem espacos).
+
+    Returns:
+        dict com emitente, destinatario, totais e protocolo da nota.
+    """
+    resultado = await consultar_nfce(chave_acesso)
+    return resultado.model_dump(mode="json", exclude_none=True)
+
+
+@app.tool(
     name="validar_chave_nfe",
     description=(
         "Valida o formato e o dígito verificador de uma chave de acesso de NFe. "
@@ -224,25 +380,306 @@ async def tool_validar_chave_nfe(chave_acesso: str) -> dict[str, Any]:
 @app.tool(
     name="consultar_status_sefaz",
     description=(
-        "Consulta o status atual do serviço SEFAZ de um estado brasileiro. "
-        "Verifica se o webservice da SEFAZ para emissão de NFe está operacional. "
-        "Útil para diagnosticar falhas de transmissão de notas fiscais."
+        "Consulta o status real do serviço SEFAZ de um estado brasileiro via "
+        "NfeStatusServico4 (mTLS). Verifica se o webservice da SEFAZ para emissão "
+        "de NFe está operacional. Útil para diagnosticar falhas de transmissão de "
+        "notas fiscais. Requer certificado digital A1 configurado no servidor "
+        "(NFE_CERTIFICADO_PATH / NFE_CERTIFICADO_SENHA) - mTLS é exigência de "
+        "transporte de todo webservice SEFAZ, inclusive consulta de status."
     ),
 )
 async def tool_consultar_status_sefaz(uf: str) -> dict[str, Any]:
-    """Consulta o status do servico de autorizacao de NF-e da SEFAZ de uma UF.
+    """Consulta o status real do servico de autorizacao de NF-e da SEFAZ de uma UF.
 
     Indica se o webservice da SEFAZ do estado esta operacional, util para diagnosticar
     falhas na transmissao de notas fiscais.
+
+    IMPORTANTE: exige certificado digital A1 configurado no servidor via
+    NFE_CERTIFICADO_PATH / NFE_CERTIFICADO_SENHA. mTLS e exigencia de transporte
+    de todo webservice SEFAZ, inclusive consulta de status - sem certificado,
+    esta tool levanta FiscalConfigurationError.
 
     Args:
         uf: Sigla do estado com 2 letras (ex.: "SP", "MG", "RJ"). Validada contra as UFs do Brasil.
 
     Returns:
         dict com o status atual do servico e a descricao correspondente.
+
+    Raises:
+        FiscalConfigurationError: certificado digital A1 nao configurado no servidor.
     """
     resultado = await consultar_status_sefaz(uf)
     return resultado.model_dump(mode="json", exclude_none=True)
+
+
+@app.tool(
+    name="parse_nfe_xml",
+    description=(
+        "Parseia o XML completo de uma NF-e ou NFC-e e retorna os dados estruturados. "
+        "Aceita XML com ou sem o involucro <nfeProc> e com ou sem namespace do portal fiscal. "
+        "Util para extrair emitente, destinatario, itens, totais e protocolo a partir do XML bruto."
+    ),
+)
+async def tool_parse_nfe_xml(xml_content: str) -> dict[str, Any]:
+    """Parseia o XML completo de uma NF-e ou NFC-e e retorna os dados estruturados.
+
+    Extrai automaticamente a chave de acesso do atributo Id do elemento <infNFe>.
+    Aceita XMLs com ou sem involucro de protocolo <nfeProc>, com ou sem namespace
+    do portal fiscal (http://www.portalfiscal.inf.br/nfe).
+
+    Args:
+        xml_content: XML completo da NF-e ou NFC-e como string. Pode conter
+                     o involucro <nfeProc> ou ser a NF-e nua. Aceita XML com
+                     ou sem namespace do portal fiscal.
+
+    Returns:
+        dict com os dados do documento: chave_acesso, modelo, emitente, destinatario,
+        itens, totais, protocolo_autorizacao e demais campos da NFeResponse.
+
+    Raises:
+        DocumentoParseError: Se o XML for invalido ou a chave nao tiver 44 digitos.
+        XMLParseError: Se o XML estiver malformado.
+    """
+    resultado = parse_nfe_documento(xml_content)
+    return resultado.model_dump(mode="json", exclude_none=True)
+
+
+@app.tool(
+    name="gerar_danfe",
+    description=(
+        "Gera o DANFE (Documento Auxiliar da Nota Fiscal Eletronica) em PDF a partir do XML de NF-e. "
+        "Suporta apenas NF-e modelo 55. O PDF e retornado em base64. "
+        "ATENCAO: o XML deve conter o namespace do portal fiscal "
+        "(xmlns='http://www.portalfiscal.inf.br/nfe'). "
+        "Nao e necessario certificado digital - funciona apenas com o XML."
+    ),
+)
+async def tool_gerar_danfe(xml_content: str) -> dict[str, Any]:
+    """Gera o DANFE em PDF a partir do XML de uma NF-e (modelo 55).
+
+    Utiliza a lib brazilfiscalreport para gerar o DANFE A4 no formato retrato.
+    O PDF e retornado como base64 no campo pdf_base64 do resultado.
+
+    NAMESPACE OBRIGATORIO: o XML deve conter o namespace do portal fiscal
+    (http://www.portalfiscal.inf.br/nfe). Modelo 65 (NFC-e) nao e suportado
+    na versao atual.
+
+    SEGURANCA: o XML e validado contra XXE (billion-laughs, entidades externas)
+    antes de ser entregue a lib de geracao do PDF.
+
+    Args:
+        xml_content: XML completo da NF-e como string. Deve conter o namespace
+                     do portal fiscal. Aceita XML com ou sem involucro <nfeProc>.
+
+    Returns:
+        dict com pdf_base64 (PDF em base64), modelo, nome_arquivo, chave_acesso,
+        numero e serie.
+    """
+    resultado: DanfeResult = gerar_danfe(xml_content)
+    return resultado.model_dump(mode="json", exclude_none=True)
+
+
+@app.tool(
+    name="validar_assinatura_nfe",
+    description=(
+        "Valida a assinatura digital XMLDSig de uma NF-e. "
+        "Verifica a integridade do DigestValue e a assinatura criptografica do certificado. "
+        "Extrai dados do certificado assinante: titular, CNPJ/CPF, validade e autoridade certificadora. "
+        "Opcional: informe um CA bundle PEM para validar a cadeia de confianca ICP-Brasil."
+    ),
+)
+async def tool_validar_assinatura_nfe(
+    xml_content: str,
+    ca_bundle: str | None = None,
+) -> dict[str, Any]:
+    """Valida a assinatura digital XMLDSig de uma NF-e.
+
+    Verifica a integridade (DigestValue) e a assinatura criptografica do
+    elemento Signature presente em infNFe. Extrai dados do certificado assinante.
+
+    Sem ca_bundle: valida apenas a assinatura criptografica e integridade do digest
+    usando o certificado embutido no proprio XML. Nao verifica se o certificado
+    e confiavel (sem cadeia ICP-Brasil).
+
+    Com ca_bundle (PEM): valida a assinatura E a cadeia de confianca ICP-Brasil,
+    garantindo que o certificado foi emitido por uma AC credenciada.
+
+    Args:
+        xml_content: Conteudo XML da NF-e como string. Validado contra XXE (parse_xml).
+        ca_bundle: Opcional. Conteudo PEM (nao o caminho, mas o PEM em si) com a
+                   cadeia ICP-Brasil para validar o emissor do certificado.
+
+    Returns:
+        dict com assinatura_valida (bool), motivo (se invalida), titular (CN),
+        cnpj_cpf, validade_inicio, validade_fim e ac_emissora.
+    """
+    resultado: AssinaturaResult = validar_assinatura_nfe(
+        xml_content,
+        ca_bundle=ca_bundle.encode() if ca_bundle else None,
+    )
+    return {
+        "assinatura_valida": resultado.assinatura_valida,
+        "motivo": resultado.motivo,
+        "titular": resultado.titular,
+        "cnpj_cpf": resultado.cnpj_cpf,
+        "validade_inicio": resultado.validade_inicio.isoformat()
+        if resultado.validade_inicio
+        else None,
+        "validade_fim": resultado.validade_fim.isoformat() if resultado.validade_fim else None,
+        "ac_emissora": resultado.ac_emissora,
+    }
+
+
+@app.tool(
+    name="baixar_nfe_distribuicao",
+    description=(
+        "Baixa documentos fiscais via NFeDistribuicaoDFe (SEFAZ) usando certificado A1 local. "
+        "REQUER certificado digital A1 (.pfx/.p12) do proprio usuario instalado localmente. "
+        "O certificado NUNCA e enviado a nenhum servidor - a autenticacao e feita localmente via mTLS. "
+        "Suporta busca incremental (distNSU), por NSU especifico (consNSU) ou por chave (consChNFe). "
+        "A Ciencia da Operacao (210200) e prerequisito para obter o XML completo (procNFe)."
+    ),
+)
+async def tool_baixar_nfe_distribuicao(
+    cnpj_cpf: str,
+    uf: str,
+    modo: str = "distNSU",
+    ultimo_nsu: str = "0",
+    nsu: str | None = None,
+    chave: str | None = None,
+    ambiente: str = "producao",
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """Baixa documentos fiscais via NFeDistribuicaoDFe com mTLS usando certificado A1 local.
+
+    CERTIFICADO LOCAL (opt-in): o caminho e a senha sao lidos exclusivamente das
+    configuracoes NFE_CERTIFICADO_PATH/NFE_CERTIFICADO_SENHA do processo. Segredos
+    nunca entram como argumentos da tool nem no contexto do agente.
+
+    A Ciencia da Operacao (evento 210200) e pre-requisito para a SEFAZ liberar o
+    XML completo (procNFe) ao destinatario. Sem ela, apenas o resNFe (resumo) fica
+    disponivel. Use manifestar_nfe() apos obter o resNFe.
+
+    Args:
+        cnpj_cpf: CNPJ (14 dig) ou CPF (11 dig) do autor da consulta.
+        uf: Sigla da UF do autor (ex: "SP") ou codigo IBGE (ex: "35").
+        modo: "distNSU" (incremental), "consNSU" (NSU especifico) ou
+              "consChNFe" (por chave de acesso de 44 digitos).
+        ultimo_nsu: Ultimo NSU recebido para modo distNSU. Default "0" busca todos.
+        nsu: NSU especifico para modo consNSU.
+        chave: Chave de acesso de 44 digitos para modo consChNFe.
+        ambiente: "producao" ou "homologacao".
+        timeout: Timeout HTTP em segundos (default 30.0).
+
+    Returns:
+        dict com ultimo_nsu, max_nsu e documentos (lista com nsu, tipo, schema,
+        chave e resumo de cada documento retornado).
+    """
+    caminho_certificado, senha = _nfe_credentials_from_settings()
+    resultado: DistribuicaoResult = await baixar_nfe_distribuicao(
+        caminho_certificado=caminho_certificado,
+        senha=senha,
+        cnpj_cpf=cnpj_cpf,
+        uf=uf,
+        modo=modo,  # type: ignore[arg-type]
+        ultimo_nsu=ultimo_nsu,
+        nsu=nsu,
+        chave=chave,
+        ambiente=ambiente,  # type: ignore[arg-type]
+        timeout=timeout,
+    )
+    # Serializa manualmente pois DistribuicaoResult e dataclass frozen com nested dataclasses
+    docs = []
+    for doc in resultado.documentos:
+        docs.append(
+            {
+                "nsu": doc.nsu,
+                "tipo": doc.tipo,
+                "schema": doc.schema,
+                "chave": doc.chave,
+                "resumo": doc.resumo,
+                "dados_completos": (
+                    doc.dados_completos.model_dump(mode="json", exclude_none=True)
+                    if doc.dados_completos is not None
+                    else None
+                ),
+            }
+        )
+    return {
+        "ultimo_nsu": resultado.ultimo_nsu,
+        "max_nsu": resultado.max_nsu,
+        "documentos": docs,
+    }
+
+
+@app.tool(
+    name="manifestar_nfe",
+    description=(
+        "Manifesta o destinatario em uma NF-e via NFeRecepcaoEvento. "
+        "REQUER certificado digital A1 (.pfx/.p12) do proprio usuario instalado localmente. "
+        "O certificado NUNCA e enviado a nenhum servidor - a assinatura e feita localmente. "
+        "Eventos: 210200 (Ciencia), 210210 (Confirmacao), 210220 (Desconhecimento), "
+        "210240 (Operacao nao Realizada, requer justificativa). "
+        "A Ciencia (210200) e prerequisito obrigatorio para obter o XML completo da NF-e."
+    ),
+)
+async def tool_manifestar_nfe(
+    chave: str,
+    tipo_evento: str,
+    cnpj_cpf: str,
+    uf: str = "91",
+    numero_sequencia: int = 1,
+    justificativa: str | None = None,
+    ambiente: str = "producao",
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """Manifesta o destinatario em uma NF-e via NFeRecepcaoEvento.
+
+    CERTIFICADO LOCAL (opt-in): caminho e senha sao carregados das configuracoes
+    NFE_CERTIFICADO_PATH/NFE_CERTIFICADO_SENHA do processo, fora do schema MCP.
+    A assinatura XMLDSig e feita localmente e o XML assinado vai direto a SEFAZ.
+
+    Eventos disponiveis:
+    - 210200: Ciencia da Operacao (pre-requisito para obter procNFe)
+    - 210210: Confirmacao da Operacao
+    - 210220: Desconhecimento da Operacao
+    - 210240: Operacao nao Realizada (justificativa OBRIGATORIA, minimo 15 caracteres)
+
+    Args:
+        chave: Chave de acesso de 44 digitos da NF-e.
+        tipo_evento: Codigo do evento ("210200", "210210", "210220" ou "210240").
+        cnpj_cpf: CNPJ (14 dig) ou CPF (11 dig) do destinatario.
+        uf: UF do autor. Default "91" = AN (Ambiente Nacional) para manifestacao.
+        numero_sequencia: Numero sequencial do evento para esta chave (1 a 20).
+        justificativa: Obrigatoria para evento 210240 (minimo 15 caracteres).
+        ambiente: "producao" ou "homologacao".
+        timeout: Timeout HTTP em segundos (default 30.0).
+
+    Returns:
+        dict com sucesso (bool), chave, tipo_evento, numero_protocolo,
+        codigo_retorno e motivo retornados pela SEFAZ.
+    """
+    caminho_certificado, senha = _nfe_credentials_from_settings()
+    resultado: ManifestacaoResult = await manifestar_nfe(
+        chave=chave,
+        tipo_evento=tipo_evento,
+        caminho_certificado=caminho_certificado,
+        senha=senha,
+        cnpj_cpf=cnpj_cpf,
+        uf=uf,
+        numero_sequencia=numero_sequencia,
+        justificativa=justificativa,
+        ambiente=ambiente,  # type: ignore[arg-type]
+        timeout=timeout,
+    )
+    return {
+        "sucesso": resultado.sucesso,
+        "chave": resultado.chave,
+        "tipo_evento": resultado.tipo_evento,
+        "numero_protocolo": resultado.numero_protocolo,
+        "codigo_retorno": resultado.codigo_retorno,
+        "motivo": resultado.motivo,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -253,9 +690,9 @@ async def tool_consultar_status_sefaz(uf: str) -> dict[str, Any]:
 @app.tool(
     name="consultar_nfse",
     description=(
-        "Consulta dados de uma NFSe (Nota Fiscal de Serviço Eletrônica). "
-        "ATENÇÃO: NFSe não possui padrão nacional - cada município tem seu próprio sistema. "
-        "Esta ferramenta orienta sobre como acessar o portal correto do município."
+        "Consulta NFS-e tentando primeiro o Ambiente de Dados Nacional (ADN) com mTLS/A1 "
+        "quando configurado. Quando o documento/município não estiver coberto ou a API "
+        "autenticada não puder ser usada, retorna fallback municipal explícito."
     ),
 )
 async def tool_consultar_nfse(
@@ -264,11 +701,11 @@ async def tool_consultar_nfse(
     uf: str,
     cnpj_prestador: str | None = None,
 ) -> dict[str, str]:
-    """Orienta a consulta de uma NFS-e (Nota Fiscal de Servicos eletronica) por municipio.
+    """Consulta NFS-e pelo padrão nacional quando possível, com fallback municipal.
 
-    A NFS-e e municipal e nao tem padrao nacional unico, entao esta ferramenta retorna o portal
-    da prefeitura, o tipo de sistema (ABRASF, ISS.net etc.) e alternativas de integracao, em vez
-    de buscar os dados da nota diretamente.
+    O Sistema Nacional NFS-e coexiste com soluções municipais. A implementação tenta
+    primeiro a ADN autenticada por ICP-Brasil/mTLS e preserva o motivo do fallback quando
+    precisa orientar consulta municipal.
 
     Args:
         numero: Numero da NFS-e.
@@ -301,7 +738,7 @@ async def tool_consultar_simples_nacional(cnpj: str) -> dict[str, Any]:
     Util para definir o regime tributario antes de calcular impostos ou tributar notas fiscais.
 
     Args:
-        cnpj: Numero do CNPJ com 14 digitos, com ou sem formatacao.
+        cnpj: Numero do CNPJ com 14 caracteres (numerico ou alfanumerico, IN RFB 2.229/2024), com ou sem formatacao.
 
     Returns:
         dict com a situacao no Simples Nacional e no MEI e respectivas datas.
@@ -347,7 +784,9 @@ async def tool_analisar_sped(conteudo: str, nome_arquivo: str | None = None) -> 
         "Exemplo: buscar todos os registros C100 (documentos fiscais) ou E110 (apuração ICMS)."
     ),
 )
-async def tool_listar_registros_sped(conteudo: str, tipo_registro: str) -> list[dict[str, str]]:
+async def tool_listar_registros_sped(
+    conteudo: str, tipo_registro: str
+) -> list[dict[str, str | list[str]]]:
     """Lista todas as ocorrencias de um tipo de registro dentro de um arquivo SPED.
 
     Para cada linha cujo codigo inicial coincide com tipo_registro, retorna o codigo,
@@ -487,11 +926,12 @@ async def tool_analyze_cnpj_compliance(cnpj: str) -> dict[str, Any]:
     um relatorio com score 0-100, classificacao de risco e achados acionaveis.
 
     Args:
-        cnpj: Numero do CNPJ com 14 digitos, com ou sem formatacao.
+        cnpj: Numero do CNPJ com 14 caracteres (numerico ou alfanumerico, IN RFB 2.229/2024), com ou sem formatacao.
 
     Returns:
         dict com score, risco, situacao, regime, cnae e lista de achados.
     """
+    _validar_cnpj_ou_erro(cnpj)
     resultado = await analyze_cnpj_compliance(cnpj)
     return resultado.model_dump(mode="json", exclude_none=True)
 
@@ -521,6 +961,122 @@ async def tool_compare_tax_regimes(
     return resultado.model_dump(mode="json", exclude_none=True)
 
 
+# ---------------------------------------------------------------------------
+# Helpers de normalizacao de entrada para o simulador de reforma tributaria
+# ---------------------------------------------------------------------------
+
+
+def _remover_acentos(texto: str) -> str:
+    """Remove diacriticos de uma string (ex.: 'comércio' -> 'comercio')."""
+    normalizado = unicodedata.normalize("NFKD", texto)
+    return "".join(c for c in normalizado if not unicodedata.combining(c))
+
+
+# Mapeamentos de normalizacao: chave sem acento em casefold -> valor canonico
+_mapa_setor: dict[str, Literal["comércio", "serviços", "indústria"]] = {
+    "comercio": "comércio",
+    "servicos": "serviços",
+    "industria": "indústria",
+}
+
+_mapa_regime: dict[str, Literal["Simples Nacional", "Lucro Presumido", "Lucro Real"]] = {
+    "simples nacional": "Simples Nacional",
+    "simples": "Simples Nacional",
+    "lucro presumido": "Lucro Presumido",
+    "presumido": "Lucro Presumido",
+    "lucro real": "Lucro Real",
+    "real": "Lucro Real",
+}
+
+
+def _normalizar_setor(setor: str) -> Literal["comércio", "serviços", "indústria"]:
+    """Normaliza a entrada de setor aceitando variantes sem acento e em qualquer caixa.
+
+    Exemplos aceitos: 'comercio', 'COMERCIO', 'Comércio' -> 'comércio'.
+    """
+    chave = _remover_acentos(setor.strip().casefold())
+    canonico = _mapa_setor.get(chave)
+    if canonico is None:
+        opcoes = ", ".join(f'"{v}"' for v in ("comércio", "serviços", "indústria"))
+        raise ValueError(f'Setor "{setor}" nao reconhecido. Use um dos valores validos: {opcoes}.')
+    return canonico
+
+
+def _normalizar_regime(
+    regime: str,
+) -> Literal["Simples Nacional", "Lucro Presumido", "Lucro Real"]:
+    """Normaliza a entrada de regime tributario aceitando variantes sem acento e em qualquer caixa.
+
+    Exemplos aceitos: 'simples nacional', 'SIMPLES NACIONAL', 'simples' -> 'Simples Nacional'.
+    """
+    chave = _remover_acentos(regime.strip().casefold())
+    canonico = _mapa_regime.get(chave)
+    if canonico is None:
+        opcoes = ", ".join(f'"{v}"' for v in ("Simples Nacional", "Lucro Presumido", "Lucro Real"))
+        raise ValueError(
+            f'Regime "{regime}" nao reconhecido. Use um dos valores validos: {opcoes}.'
+        )
+    return canonico
+
+
+@app.tool(
+    name="simular_transicao_reforma_tributaria",
+    description=(
+        "Simula o impacto da Reforma Tributaria (LC 214/2025) ano a ano de 2026 a 2033. "
+        "Compara a carga do regime antigo (PIS/COFINS + ICMS ou ISS) com a do regime novo "
+        "(CBS + IBS), mostrando o blend da transicao conforme o cronograma legal. "
+        "Setores: comercio, servicos ou industria. "
+        "Regimes: Simples Nacional, Lucro Presumido ou Lucro Real. "
+        "Informe aliquota_icms_atual ou aliquota_iss_atual para maior precisao. "
+        "Retorna projecao anual com premissas e disclaimers obrigatorios."
+    ),
+)
+async def tool_simular_transicao_reforma_tributaria(
+    faturamento_anual: float,
+    setor: str,
+    regime_atual: str,
+    aliquota_icms_atual: float | None = None,
+    aliquota_iss_atual: float | None = None,
+    aliquota_pis_cofins: float | None = None,
+) -> dict[str, Any]:
+    """Simula o impacto financeiro da transicao para o novo sistema tributario (LC 214/2025).
+
+    Projeta, ano a ano de 2026 a 2033, a carga tributaria estimada do regime antigo
+    (PIS/COFINS + ICMS ou ISS) e do regime novo (CBS + IBS), conforme o cronograma de
+    transicao da LC 214/2025: teste em 2026, CBS plena em 2027-2028, reducao gradual
+    de ICMS/ISS de 2029 a 2032 e extincao total em 2033.
+
+    Args:
+        faturamento_anual: Receita bruta anual em reais. Deve ser positivo.
+        setor: Setor da empresa. Aceita: "comércio", "serviços" ou "indústria".
+        regime_atual: Regime tributario atual. Aceita: "Simples Nacional",
+            "Lucro Presumido" ou "Lucro Real".
+        aliquota_icms_atual: Aliquota do ICMS (%) vigente no estado da empresa.
+            Obrigatoria para comercio/industria para maior precisao. Se None, assume 12%.
+        aliquota_iss_atual: Aliquota do ISS (%) vigente no municipio da empresa.
+            Obrigatoria para servicos para maior precisao. Se None, assume 5%.
+        aliquota_pis_cofins: Aliquota efetiva de PIS/COFINS (%) sobre o faturamento.
+            Se None, usa o padrao do regime informado (LP: 3,65%; LR: 9,25%; SN: 3,65%).
+
+    Returns:
+        dict com projecao anual 2026-2033, premissas utilizadas e avisos legais obrigatorios.
+    """
+    # Normaliza entradas aceitando variantes sem acento e em qualquer caixa
+    # (ex.: "comercio", "COMERCIO", "Comércio" -> "comércio")
+    setor_canonico = _normalizar_setor(setor)
+    regime_canonico = _normalizar_regime(regime_atual)
+
+    resultado = simular_transicao_reforma_tributaria(
+        faturamento_anual=faturamento_anual,
+        setor=setor_canonico,
+        regime_atual=regime_canonico,
+        aliquota_icms_atual=aliquota_icms_atual,
+        aliquota_iss_atual=aliquota_iss_atual,
+        aliquota_pis_cofins=aliquota_pis_cofins,
+    )
+    return resultado.model_dump(mode="json", exclude_none=True)
+
+
 @app.tool(
     name="risk_score_supplier",
     description=(
@@ -538,12 +1094,13 @@ async def tool_risk_score_supplier(cnpj: str, criterios_estritos: bool = False) 
     politicas anti-corrupcao (ex: Lei 12.846/2013).
 
     Args:
-        cnpj: Numero do CNPJ com 14 digitos, com ou sem formatacao.
+        cnpj: Numero do CNPJ com 14 caracteres (numerico ou alfanumerico, IN RFB 2.229/2024), com ou sem formatacao.
         criterios_estritos: Se True, aplica pesos mais rigorosos. Padrao: False.
 
     Returns:
         dict com score, recomendacao e justificativa da classificacao.
     """
+    _validar_cnpj_ou_erro(cnpj)
     resultado = await risk_score_supplier(cnpj, criterios_estritos)
     return resultado.model_dump(mode="json", exclude_none=True)
 
@@ -591,8 +1148,9 @@ async def tool_consultar_empresas_lote(
     ),
 )
 async def tool_validate_nfe_full(xml_path: str) -> dict[str, Any]:
-    """Validacao consolidada de NFe."""
-    resultado = await validate_nfe_full(xml_path)
+    """Validacao consolidada de NFe dentro do diretorio permitido."""
+    path = _validated_local_file(xml_path, label="Arquivo XML")
+    resultado = await validate_nfe_full(path)
     return resultado.model_dump(mode="json", exclude_none=True)
 
 
@@ -605,8 +1163,9 @@ async def tool_validate_nfe_full(xml_path: str) -> dict[str, Any]:
     ),
 )
 async def tool_summarize_sped(file_path: str) -> dict[str, Any]:
-    """Sumarizacao executiva de arquivo SPED."""
-    resultado = await summarize_sped(file_path)
+    """Sumarizacao executiva de SPED dentro do diretorio permitido."""
+    path = _validated_local_file(file_path, label="Arquivo SPED")
+    resultado = await summarize_sped(path)
     return resultado.model_dump(mode="json", exclude_none=True)
 
 
@@ -621,6 +1180,7 @@ cnae_tools.register(app)
 ibge_tools.register(app)
 mei_tools.register(app)
 empresa_tools.register(app)
+importacao_tools.register(app)
 
 
 def main() -> None:

@@ -3,13 +3,14 @@ from datetime import date
 from mcp_fiscal_brasil._core import FiscalNotFoundError, HTTPClient, get_logger, settings
 from mcp_fiscal_brasil._core.errors import FiscalHTTPError
 
+from ..shared.validators import normalizar_cnpj, validate_cnpj_qualquer
 from .schemas import MEIStatus
 
 logger = get_logger(__name__)
 
 
 class MEIClient:
-    """Cliente para consulta do MEI via BrasilAPI."""
+    """Consulta o indicador MEI exposto no endpoint CNPJ da BrasilAPI."""
 
     def _http_client(self) -> HTTPClient:
         return HTTPClient(
@@ -29,33 +30,30 @@ class MEIClient:
             return None
 
     async def get_mei_status(self, cnpj: str) -> MEIStatus:
-        """Consulta o status MEI de um CNPJ."""
-        logger.info("mei_status_started", cnpj=cnpj)
-        cnpj_clean = "".join(c for c in cnpj if c.isdigit())
+        """Consulta indicadores de MEI e Simples no cadastro público agregado do CNPJ."""
+        cnpj_clean = normalizar_cnpj(cnpj)
+        if not validate_cnpj_qualquer(cnpj_clean):
+            raise FiscalNotFoundError("CNPJ inválido", "CNPJ", cnpj_clean)
+
+        logger.info("mei_status_started", cnpj=cnpj_clean)
         async with self._http_client() as client:
             try:
-                data = await client.get(f"/simples/v1/{cnpj_clean}")
-
-                simples = data.get("simples") if isinstance(data.get("simples"), dict) else data
-                simei = data.get("simei") if isinstance(data.get("simei"), dict) else data
-
-                if not isinstance(simples, dict):
-                    simples = {}
-                if not isinstance(simei, dict):
-                    simei = {}
-
-                return MEIStatus(
-                    cnpj=cnpj_clean,
-                    mei=simei.get("optante", data.get("mei", False)),
-                    data_opcao_mei=self._parse_date(
-                        simei.get("data_opcao", data.get("data_opcao_simei"))
-                    ),
-                    data_exclusao_mei=self._parse_date(
-                        simei.get("data_exclusao", data.get("data_exclusao_simei"))
-                    ),
-                    simples_nacional=simples.get("optante", data.get("simples_nacional", False)),
-                )
+                data = await client.get(f"/cnpj/v1/{cnpj_clean}")
             except FiscalHTTPError as exc:
                 if exc.status_code == 404:
-                    raise FiscalNotFoundError("CNPJ não encontrado", "CNPJ", cnpj_clean) from exc
+                    raise FiscalNotFoundError(
+                        "CNPJ não encontrado na fonte cadastral", "CNPJ", cnpj_clean
+                    ) from exc
                 raise
+
+        return MEIStatus(
+            cnpj=cnpj_clean,
+            mei=bool(data.get("opcao_pelo_mei"))
+            if data.get("opcao_pelo_mei") is not None
+            else False,
+            data_opcao_mei=self._parse_date(data.get("data_opcao_pelo_mei")),
+            data_exclusao_mei=self._parse_date(data.get("data_exclusao_do_mei")),
+            simples_nacional=bool(data.get("opcao_pelo_simples"))
+            if data.get("opcao_pelo_simples") is not None
+            else False,
+        )

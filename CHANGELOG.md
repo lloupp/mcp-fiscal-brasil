@@ -1,5 +1,227 @@
 # Changelog
 
+## Unreleased
+
+Correções originadas do fork de Italo9 (github.com/Italo9/mcp-fiscal-brasil),
+portadas seletivamente para o repositório canônico.
+
+### BREAKING CHANGES
+
+* `consultar_status_sefaz` agora consulta o webservice real da SEFAZ
+  (NfeStatusServico4, mTLS) em vez do proxy da BrasilAPI, e por isso passa a
+  exigir certificado digital A1 configurado (`NFE_CERTIFICADO_PATH` /
+  `NFE_CERTIFICADO_SENHA`). Sem certificado, a tool levanta
+  `FiscalConfigurationError`; o endpoint REST `GET /v1/nfe/status-sefaz`
+  responde 503 em vez de fingir sucesso com lista vazia.
+
+### Novas funcionalidades
+
+* consulta real de status da SEFAZ via NfeStatusServico4 (mTLS), substituindo
+  o antigo proxy da BrasilAPI que retornava 404 para toda UF
+* endpoint `GET /v1/fiscal/certificado/status` informa apenas
+  configurado/válido/validade_fim - sem titular nem CNPJ, para não permitir
+  reconhecimento de identidade em um endpoint sem autenticação - sem nunca
+  expor o arquivo ou a senha do certificado
+* endpoint `GET /v1/nfe/status-sefaz` consolidado, consultando as 27 UFs em
+  paralelo quando nenhuma UF específica é informada, com cache em memória de
+  60 segundos por UF para conter o fan-out de chamadas mTLS reais ao
+  certificado do operador; falha pontual de rede em uma UF é omitida da
+  resposta (sem derrubar a chamada inteira), mas certificado ausente responde
+  503 e não mais lista vazia
+* `POST /v1/nfe/validate` aceita conteúdo XML inline (campo `xml`), além do
+  `xml_path` (caminho de arquivo) já existente
+* configuração de certificado digital A1 via `NFE_CERTIFICADO_PATH`,
+  `NFE_CERTIFICADO_SENHA`, `NFE_EMITENTE_CNPJ` e `NFE_AMBIENTE`; quando
+  `NFE_EMITENTE_CNPJ` está definido, todo certificado carregado é conferido
+  contra esse CNPJ
+* nova exceção `FiscalConfigurationError` para integrações fiscais que
+  exigem configuração ausente no deploy (distinta de erro de validação de
+  input ou de falha do serviço externo)
+
+### Correções
+
+* healthcheck do Dockerfile passa a detectar automaticamente o modo do
+  container (stdio vs. REST API vs. MCP HTTP/SSE), evitando falso "unhealthy"
+  permanente; o servidor MCP passa a expor `GET /health` nos transportes
+  http/sse (antes só existia `/mcp`, então o healthcheck sempre falhava
+  nesses modos)
+* `GET /v1/nfe/status-sefaz` não engole mais `FiscalConfigurationError` como
+  sucesso vazio (200); certificado ausente agora responde 503 com detail
+  claro. Degradação silenciosa (log + omissão da UF) fica restrita a falha
+  pontual de rede (`FiscalHTTPError`)
+* `GET /v1/fiscal/certificado/status` deixa de expor titular e CNPJ do
+  certificado configurado (recon desnecessário em endpoint sem autenticação)
+
+### Refatoração
+
+* helpers de carregamento de certificado A1 e envio SOAP com mTLS
+  (`carregar_pkcs12`, `criar_ssl_context_em_memoria`, `enviar_soap`)
+  extraídos para `nfe/_soap_mtls.py` e compartilhados entre distribuição,
+  manifestação e consulta de status
+* `_endpoint_para_uf` (status_sefaz.py) passa a levantar
+  `FiscalValidationError` para UF sem endpoint mapeado, em vez de
+  `FiscalConfigurationError` (reservada a certificado A1 ausente)
+
+### Notas
+
+* Follow-up conhecido (pré-existente ao port, fora de escopo desta entrega):
+  as rotas REST deste serviço não possuem autenticação nem rate limit por
+  cliente. Avaliar API key e/ou rate limit por cliente em versão futura.
+
+### Correções (CLI e Simples Nacional, 2026-09-03)
+
+* CLI `simples` não vaza mais traceback: CNPJ válido sem opção pelo Simples/MEI (BrasilAPI responde 404) agora retorna status negativo em vez de erro; CNPJ com dígito verificador inválido de fato continua sendo rejeitado antes de qualquer chamada de rede
+* nenhum subcomando do CLI (`cnpj`, `cpf`, `cep`, `simples`, `municipio`, `compliance`, `supplier`, `regimes`) vaza mais traceback: erro de negócio vira JSON estruturado no stdout com código de saída 1, erro inesperado com código 2
+* corpo de resposta HTTP não-JSON de serviços externos agora vira `FiscalHTTPError` em vez de `json.JSONDecodeError` não tratado
+
+## [0.5.1](https://github.com/DeHor-Labs/mcp-fiscal-brasil/compare/v0.5.0...v0.5.1) (2026-06-21)
+
+
+### Documentação
+
+* polimento das notas de release em pt-BR ([#101](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/101)) ([c26e4d9](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/c26e4d95a779dcb19ebb0938ac10ae6b89e6ad45))
+
+
+### Integração contínua
+
+* sincroniza metadados JSON no Release Please
+
+## [0.5.0](https://github.com/DeHor-Labs/mcp-fiscal-brasil/compare/v0.4.0...v0.5.0) (2026-06-21)
+
+
+### Novas funcionalidades
+
+* cálculo de impostos de importação por NCM (MVP) ([#70](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/70)) ([85916e2](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/85916e23f41149d8f02d8bca3d8dead3a4df2fc2))
+* circuit breaker para a NFS-e Nacional ADN ([#49](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/49)) ([#68](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/68)) ([2fa2f52](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/2fa2f52a4783eb79d12a076efb1b46f75a8fd3fc))
+
+
+### Correções
+
+* endurece a validação fiscal e os metadados de release ([#99](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/99)) ([93ec232](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/93ec2327404f04991cee035845f9d176264d8e4b))
+* parser SPED extrai valores de PIS/COFINS/ICMS ([#61](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/61)) ([#67](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/67)) ([6078b7b](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/6078b7b66c79879cda24bf8ffe9e3cde89ea315c))
+* render do README no PyPI (imagem com URL absoluta + número de tools) ([#80](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/80)) ([db2fd31](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/db2fd310e841076a85c5d9ac4e9a8763adce87c1))
+* valida caminhos de arquivo contra path injection (CodeQL High) ([#81](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/81)) ([be6f39e](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/be6f39e25aaa9680f7d88f32cfc67138d5988a11))
+* welcome bot em pt-BR e sem comentar em bots ([#82](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/82)) ([8a47c4d](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/8a47c4de6293def59b17070c7d4f0914771e2cc3))
+
+
+### Documentação
+
+* corrige indentação da docstring de SPED ([#100](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/100)) ([42734bb](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/42734bb16e4b578c5ee8670837d4ad63eb59f8b4))
+* seção Como acompanhar (Discussions, releases, newsletter) ([#75](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/75)) ([18366f7](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/18366f7acd82f25fa4b2bceb401dfe8e24fd9104))
+
+
+### Integração contínua
+
+* adiciona workflow CodeQL com `workflow_dispatch` para reverificação manual ([bc96ed5](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/bc96ed5bc2701079127737fcdf5c5398c916ba81))
+* auto-aprovar e auto-mergear Dependabot patch/minor (vulnerabilidades inclusas) ([#83](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/83)) ([c852707](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/c852707d3cd14157924600a058da2670d4f6cc7d))
+* bots de triagem de issues (on-open + re-triagem semanal) ([#69](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/69)) ([51263b5](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/51263b5266b2846df3f74d725ea10d1f55e8f510))
+* CodeQL focado em segurança (security-extended) ([#85](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/85)) ([72ebaf6](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/72ebaf60f800d0cbc3bc39abbf72efc5f61f506a))
+* fixa actions por SHA (cadeia de suprimentos, CodeQL) ([#86](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/86)) ([fce7066](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/fce70663c90976d1b15d2c50027cfc537118e847))
+* release automatizado com release-please (Release PR + publish encadeado) ([#87](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/87)) ([1875227](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/18752278f4bd153743ff0ee32e733cf28acfbb63))
+* release notes automáticas com release-drafter (motor de newsletter via GitHub) ([#79](https://github.com/DeHor-Labs/mcp-fiscal-brasil/issues/79)) ([26a3dda](https://github.com/DeHor-Labs/mcp-fiscal-brasil/commit/26a3dda93578c888d76a6fd6f70fdef3c015ec4c))
+
+## [Unreleased]
+
+### Added
+
+#### Cálculo de tributos de importação por NCM (módulo `importacao`)
+
+- `calcular_tributos_importacao` - calcula a cascata completa de tributos de importação
+  (II, IPI, PIS/COFINS-importação, ICMS grossed-up, AFRMM e taxa Siscomex) a partir do
+  valor aduaneiro, alíquota II (TEC) informada pelo usuário, UF importadora e modal.
+  Offline para IPI (banco NCM/TIPI), ICMS (tabela interna de alíquotas estaduais),
+  AFRMM e Siscomex. Retorna breakdown por tributo com base, alíquota, valor, fundamento
+  legal, avisos e disclaimers obrigatórios. Sem API key. Escopo MVP: fora de antidumping,
+  regimes especiais, acordos bilaterais e alíquotas diferenciadas de PIS/COFINS.
+- `consultar_aliquotas_importacao` - retorna a alíquota IPI do banco NCM/TIPI bundled,
+  os defaults de PIS/COFINS-importação (2,1% e 9,65%, Lei 10.865/2004) e aviso sobre
+  a alíquota II (TEC), que não está disponível offline e deve ser informada pelo usuário.
+  Útil para conferir a alíquota IPI antes de usar calcular_tributos_importacao.
+
+- Circuit breaker para o client da NFS-e Nacional (ADN): apos 5 falhas consecutivas,
+  novas chamadas sao bloqueadas por 60 s sem tocar a API, evitando sobrecarga em
+  instabilidades do servico. O estado e reset automaticamente apos o periodo de
+  cooldown ou em caso de sucesso (#49).
+
+### Fixed
+
+- Parser SPED agora extrai corretamente os valores de PIS (M210 `VL_CONT_PER`),
+  COFINS (M610 `VL_CONT_PER`) e ICMS (E110 `VL_ICMS_RECOLHER`) como valores a
+  recolher do período, garantindo comparabilidade entre os três tributos (#61).
+
+### Changed
+
+- **BREAKING:** `summarize_sped` renomeia a chave `icms_total` de `metricas_chave`
+  para duas chaves distintas, eliminando a inconsistência semântica entre bruto e
+  líquido:
+  - `icms_a_recolher` - `VL_ICMS_RECOLHER` (campo 13 do E110): valor líquido a
+    recolher após créditos e deduções; comparável com `pis_total` e `cofins_total`.
+  - `icms_total_debitos` - `VL_TOT_DEBITOS` (campo 02 do E110): total bruto de
+    débitos por saídas/prestações; informativo, não deve ser somado aos demais para
+    calcular carga fiscal total.
+
+  Fonte: Guia Prático EFD ICMS/IPI, Ato COTEPE/ICMS 44/2018 (versão 018).
+
+- **BREAKING:** `listar_registros_sped` retorna `campos` como `list[str]` (indexável
+  por posição) em vez da string bruta com separadores `|`. Código que fazia
+  `registro["campos"].split("|")` deve passar a usar `registro["campos"]` diretamente.
+
+## [0.4.0] - 2026-06-20
+
+Onda 2: modulo NF-e completo (parse, DANFE, assinatura, distribuicao, manifestacao) e
+simulador da transicao tributaria IBS/CBS (Reforma Tributaria 2026-2033). Total de tools
+sobe de 36 para 42.
+
+### Added
+
+#### Simulador da Reforma Tributaria IBS/CBS (modulo `agentic.reforma`)
+
+- `simular_transicao_reforma_tributaria` - simula o impacto financeiro da transicao
+  tributaria entre 2026 e 2033 para um produto dado. Recebe valor bruto, aliquota atual
+  de PIS/COFINS/ISS/ICMS e CNAE, retorna tabela anual com aliquotas IBS/CBS por fase,
+  carga tributaria comparada (atual vs. nova) e economia/custo estimado por ano.
+  Sem API key, offline. Fonte: LC 214/2025 e Resolucao Comite Gestor CG-IBS n. 1/2025.
+
+#### Normalizacao auxiliar (modulo `agentic.reforma`)
+
+- Helpers internos `normalizar_aliquota_atual` e `normalizar_regime` para canonicalizacao
+  de inputs antes do calculo - garantem que entradas em percentual (ex: 12 vs 0.12) e
+  strings de regime (simples, lucro_presumido, lucro_real) sejam tratadas uniformemente.
+
+#### Parse e DANFE offline (modulo `nfe`)
+
+- `parse_nfe_xml` - parseia XML bruto de NF-e ou NFC-e e retorna dados estruturados
+  (emitente, destinatario, itens, totais, protocolo). Sem API key, offline.
+- `gerar_danfe` - gera DANFE PDF (A4, modelo 55) a partir do XML. Retorna base64.
+  Sem API key, offline. Requer namespace `http://www.portalfiscal.inf.br/nfe`.
+  Modelo 65 (NFC-e) nao suportado na v1.0.0 da lib brazilfiscalreport.
+- `validar_assinatura_nfe` - valida assinatura XMLDSig e extrai dados do certificado
+  assinante (titular, CNPJ/CPF, validade, AC emissora). Sem API key, offline.
+  Suporte opcional a CA bundle PEM para validar cadeia ICP-Brasil.
+
+#### Distribuicao e manifestacao com certificado A1 (opt-in)
+
+- `baixar_nfe_distribuicao` - baixa documentos via NFeDistribuicaoDFe (SEFAZ) usando
+  certificado A1 local (.pfx/.p12). Suporta distNSU, consNSU e consChNFe.
+  O certificado nunca e enviado a servidores externos - autenticacao mTLS local.
+- `manifestar_nfe` - registra manifestacao do destinatario via NFeRecepcaoEvento.
+  Eventos: 210200 (Ciencia), 210210 (Confirmacao), 210220 (Desconhecimento),
+  210240 (Operacao nao Realizada). Assinatura XMLDSig feita localmente.
+
+#### Novas dependencias
+
+- `brazilfiscalreport==1.0.0` - geracao de DANFE PDF
+- `signxml>=4.5.1` - validacao e assinatura XMLDSig
+- `cryptography>=48.0.1` - manipulacao de certificados X.509 e PKCS12
+
+### Security
+
+- Toda entrada XML externa e validada via `parse_xml()` (lxml com
+  `resolve_entities=False`, `no_network=True`) antes de ser entregue a
+  brazilfiscalreport, que usa `xml.etree` sem protecao XXE propria.
+- Senhas de certificados A1 nunca aparecem em logs, excecoes ou disco persistente.
+- Arquivos PEM temporarios criados com permissao 0600 e removidos no bloco `finally`.
+
 ## [0.3.1] - 2026-06-18
 
 ### Fixed

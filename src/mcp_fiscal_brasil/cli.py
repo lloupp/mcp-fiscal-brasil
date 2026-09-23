@@ -10,6 +10,11 @@ Exemplos:
     mcp-fiscal-brasil regimes --faturamento 500000 --setor serviços --folha 180000
     mcp-fiscal-brasil cpf 12345678909
     mcp-fiscal-brasil cep 01001000
+
+Toda saída é JSON estruturado (mesmo em erro): {"ok": true, ...} ou
+{"ok": false, "erro": "...", "tipo": "...", "cnpj": ...}. Nenhum comando
+vaza traceback: erro de negócio (FiscalError) sai com código 1, erro
+inesperado sai com código 2.
 """
 
 from __future__ import annotations
@@ -17,17 +22,20 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-from typing import Any
+from collections.abc import Coroutine
+from typing import Any, NoReturn
 
 import typer
 from pydantic import BaseModel
 
 from . import __version__
+from ._core.errors import FiscalError
 from .agentic import (
     analyze_cnpj_compliance,
     compare_tax_regimes,
     risk_score_supplier,
 )
+from .capabilities import listar_capacidades_fiscais
 from .cep.client import CEPClient
 from .cnpj.tools import consultar_cnpj
 from .cpf.tools import validar_cpf_tool
@@ -36,9 +44,10 @@ from .simples.client import SimplesClient
 
 app = typer.Typer(
     name="mcp-fiscal-brasil",
-    help="CLI fiscal brasileiro: CNPJ, CPF, Simples, NFe, SPED e mais.",
+    help="CLI fiscal brasileiro para consultas, triagem e descoberta de capacidades.",
     no_args_is_help=True,
     add_completion=False,
+    pretty_exceptions_enable=False,
 )
 
 
@@ -74,10 +83,50 @@ def _pretty(value: Any, indent: int) -> None:
         typer.echo(f"{prefix}{value}")
 
 
+def _fail(exc: Exception, cnpj: str | None, code: int) -> NoReturn:
+    """Imprime um erro como JSON estruturado no stdout e sai sem traceback."""
+    payload = {
+        "ok": False,
+        "erro": str(exc),
+        "tipo": type(exc).__name__,
+        "cnpj": cnpj,
+    }
+    typer.echo(json.dumps(payload, ensure_ascii=False))
+    raise typer.Exit(code=code)
+
+
+def _run(coro: Coroutine[Any, Any, Any], *, cnpj: str | None = None) -> Any:
+    """Executa uma coroutine do CLI convertendo erros em JSON (nunca traceback)."""
+    try:
+        return asyncio.run(coro)
+    except FiscalError as exc:
+        _fail(exc, cnpj, code=1)
+    except Exception as exc:  # CLI nunca deve vazar traceback
+        _fail(exc, cnpj, code=2)
+
+
+def _call(func: Any, cnpj: str | None = None) -> Any:
+    """Executa uma função síncrona do CLI convertendo erros em JSON (nunca traceback)."""
+    try:
+        return func()
+    except FiscalError as exc:
+        _fail(exc, cnpj, code=1)
+    except Exception as exc:  # CLI nunca deve vazar traceback
+        _fail(exc, cnpj, code=2)
+
+
 @app.command()
 def version() -> None:
     """Exibe versão do pacote."""
     typer.echo(f"mcp-fiscal-brasil {__version__}")
+
+
+@app.command()
+def capabilities(
+    as_json: bool = typer.Option(False, "--json", help="Saida em JSON puro"),
+) -> None:
+    """Lista capabilities fiscais habilitadas neste runtime."""
+    _print(listar_capacidades_fiscais(), as_json)
 
 
 @app.command()
@@ -86,7 +135,7 @@ def cnpj(
     as_json: bool = typer.Option(False, "--json", help="Saida em JSON puro"),
 ) -> None:
     """Consulta dados cadastrais de um CNPJ."""
-    resultado = asyncio.run(consultar_cnpj(número))
+    resultado = _run(consultar_cnpj(número), cnpj=número)
     _print(resultado, as_json)
 
 
@@ -96,7 +145,7 @@ def cpf(
     as_json: bool = typer.Option(False, "--json", help="Saida em JSON puro"),
 ) -> None:
     """Valida CPF brasileiro (digito verificador, offline)."""
-    resultado = asyncio.run(validar_cpf_tool(número))
+    resultado = _run(validar_cpf_tool(número))
     _print(resultado, as_json)
 
 
@@ -111,7 +160,7 @@ def cep(
         client = CEPClient()
         return await client.get_address(número)
 
-    resultado = asyncio.run(run())
+    resultado = _run(run())
     _print(resultado, as_json)
 
 
@@ -126,7 +175,7 @@ def simples(
         client = SimplesClient()
         return await client.get_simples_status(cnpj)
 
-    resultado = asyncio.run(run())
+    resultado = _run(run(), cnpj=cnpj)
     _print(resultado, as_json)
 
 
@@ -141,7 +190,7 @@ def municipio(
         client = IBGEClient()
         return await client.get_municipality(int(codigo_ibge))
 
-    resultado = asyncio.run(run())
+    resultado = _run(run())
     _print(resultado, as_json)
 
 
@@ -151,7 +200,7 @@ def compliance(
     as_json: bool = typer.Option(False, "--json", help="Saida em JSON puro"),
 ) -> None:
     """Analise consolidada de compliance fiscal (multiplas fontes)."""
-    resultado = asyncio.run(analyze_cnpj_compliance(cnpj))
+    resultado = _run(analyze_cnpj_compliance(cnpj), cnpj=cnpj)
     _print(resultado, as_json)
 
 
@@ -162,7 +211,10 @@ def supplier(
     as_json: bool = typer.Option(False, "--json", help="Saida em JSON puro"),
 ) -> None:
     """Score de risco para due diligence de fornecedor."""
-    resultado = asyncio.run(risk_score_supplier(cnpj, criterios_estritos=estrito))
+    resultado = _run(
+        risk_score_supplier(cnpj, criterios_estritos=estrito),
+        cnpj=cnpj,
+    )
     _print(resultado, as_json)
 
 
@@ -175,12 +227,17 @@ def regimes(
 ) -> None:
     """Compara regimes tributarios (MEI/Simples/Lucro Presumido/Lucro Real)."""
     if setor not in ("comércio", "serviços", "indústria"):
-        typer.echo("Erro: setor deve ser comércio, serviços ou indústria", err=True)
-        raise typer.Exit(code=1)
-    resultado = compare_tax_regimes(
-        faturamento_anual=faturamento,
-        setor=setor,  # type: ignore[arg-type]
-        folha_pagamento_anual=folha,
+        _fail(
+            ValueError("setor deve ser comércio, serviços ou indústria"),
+            cnpj=None,
+            code=1,
+        )
+    resultado = _call(
+        lambda: compare_tax_regimes(
+            faturamento_anual=faturamento,
+            setor=setor,  # type: ignore[arg-type]
+            folha_pagamento_anual=folha,
+        )
     )
     _print(resultado, as_json)
 

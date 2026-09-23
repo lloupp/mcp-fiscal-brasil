@@ -6,16 +6,42 @@ portanto os testes usam mocks. O fallback estático deve sempre funcionar.
 
 from __future__ import annotations
 
+import ssl
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from mcp_fiscal_brasil.nfse.client import NFSeNacionalClient
+from mcp_fiscal_brasil._core.config import settings
+from mcp_fiscal_brasil.nfse.client import (
+    NFSeNacionalClient,
+    NFSeNacionalUnavailableError,
+)
 from mcp_fiscal_brasil.nfse.tools import consultar_nfse
 
 
 class TestNFSeNacionalClient:
     """Testes unitários do cliente da API Nacional NFS-e."""
+
+    @pytest.mark.asyncio
+    async def test_ssl_context_injetado_e_reutilizado(self) -> None:
+        contexto = ssl.create_default_context()
+        client = NFSeNacionalClient(ssl_context=contexto)
+        assert await client._obter_ssl_context() is contexto
+
+    @pytest.mark.asyncio
+    async def test_sem_certificado_falha_antes_da_rede(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(settings, "nfse_certificado_path", "")
+        monkeypatch.setattr(settings, "nfse_certificado_senha", "")
+        monkeypatch.setattr(settings, "nfe_certificado_path", "")
+        monkeypatch.setattr(settings, "nfe_certificado_senha", "")
+
+        client = NFSeNacionalClient()
+        with patch("httpx.AsyncClient") as http_client:
+            with pytest.raises(NFSeNacionalUnavailableError, match="certificado ICP-Brasil"):
+                await client._get("/nfse/CHAVE")
+        http_client.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_consultar_por_chave_retorna_dados_mock(self) -> None:
@@ -51,11 +77,7 @@ class TestNFSeNacionalClient:
 
     @pytest.mark.asyncio
     async def test_consultar_por_chave_retorna_none_quando_get_retorna_none(self) -> None:
-        """Quando _get retorna None (erro de rede, auth, 404), consultar_por_chave repassa None.
-
-        _get já captura todas as exceções internamente e retorna None. O double try/except
-        em consultar_por_chave foi removido pois era caminho morto (Fix 6).
-        """
+        """Quando _get retorna None (HTTP 404), consultar_por_chave repassa None."""
         client = NFSeNacionalClient()
         with patch.object(client, "_get", new_callable=AsyncMock) as mock_get:
             mock_get.return_value = None
@@ -94,8 +116,6 @@ class TestConsultarNFSeComFallback:
     @pytest.mark.asyncio
     async def test_fallback_estatico_quando_api_nacional_lanca_excecao(self) -> None:
         """Quando o cliente da API lança exceção de indisponibilidade, cai no fallback."""
-        from mcp_fiscal_brasil.nfse.client import NFSeNacionalUnavailableError
-
         with patch("mcp_fiscal_brasil.nfse.tools.NFSeNacionalClient") as mock_client_class:
             mock_instance = MagicMock()
             mock_instance.consultar_por_chave = AsyncMock(

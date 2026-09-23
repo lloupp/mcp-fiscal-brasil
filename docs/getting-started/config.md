@@ -13,6 +13,11 @@ Todas opcionais, com defaults razoaveis.
 | `MCP_FISCAL_CACHE_BACKEND` | `memory` | `memory`, `sqlite` ou `redis` |
 | `MCP_FISCAL_REDIS_URL` | - | URL do Redis (se `cache_backend=redis`) |
 | `MCP_FISCAL_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `MCP_FISCAL_FILE_BASE_DIR` | `~/.local/share/mcp-fiscal-brasil/files` | Diretório único que tools MCP podem ler por caminho |
+| `NFE_CERTIFICADO_PATH` | - | Certificado A1 para webservices SEFAZ |
+| `NFE_CERTIFICADO_SENHA` | - | Credencial do A1; use secret manager em produção |
+| `NFSE_CERTIFICADO_PATH` | fallback NFe | A1 para API Nacional NFS-e (ADN) |
+| `NFSE_CERTIFICADO_SENHA` | fallback NFe | Credencial do A1 usado na NFS-e |
 
 Exemplo `.env`:
 
@@ -21,7 +26,25 @@ MCP_FISCAL_HTTP_TIMEOUT=60
 MCP_FISCAL_CACHE_TTL=3600
 MCP_FISCAL_RATE_LIMIT=5
 MCP_FISCAL_LOG_LEVEL=DEBUG
+
+# Somente quando usar webservices autenticados:
+# NFE_CERTIFICADO_PATH=/secrets/certificado.pfx
+# NFE_CERTIFICADO_SENHA=<secret>
+# NFSE_CERTIFICADO_PATH=/secrets/certificado-nfse.pfx
+# NFSE_CERTIFICADO_SENHA=<secret>
 ```
+
+!!! warning "Certificados, credenciais e arquivos locais"
+
+    Não versione arquivos A1 nem credenciais. Em produção, monte o certificado por volume
+    seguro e injete a credencial pelo secret manager. As tools MCP de distribuição/manifestação
+    **não recebem senha nem caminho do A1 como argumentos**: usam apenas `NFE_CERTIFICADO_*`
+    do processo. Se `NFSE_CERTIFICADO_*` não estiver definido, o cliente nacional de NFS-e
+    reutiliza `NFE_CERTIFICADO_*` quando disponível.
+
+    Tools que recebem caminho de XML/SPED só podem ler arquivos sob
+    `MCP_FISCAL_FILE_BASE_DIR`. Isso evita que um agente use a tool como leitor arbitrário
+    do filesystem do host.
 
 ## Cliente MCP
 
@@ -59,7 +82,7 @@ Adicione em `claude_desktop_config.json`:
     }
     ```
 
-Reinicie o Claude Desktop. O servidor aparece como `fiscal-brasil` com 20+ ferramentas.
+Reinicie o Claude Desktop. O servidor aparece como `fiscal-brasil` com 47 ferramentas.
 
 ### Claude Code (CLI)
 

@@ -7,6 +7,7 @@ on:
 
 jobs:
   publish-mcp-registry:
+    if: ${{ github.repository == 'DeHor-Labs/mcp-fiscal-brasil' }}
     runs-on: ubuntu-latest
     permissions:
       id-token: write

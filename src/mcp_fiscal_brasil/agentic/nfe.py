@@ -9,6 +9,7 @@ from mcp_fiscal_brasil._core import get_logger
 from ..cnpj.client import CNPJClient
 from ..nfe.tools import validar_chave_nfe
 from ..nfe.xml_parser import parse_nfe_xml
+from ..shared.validators import validar_caminho_arquivo
 from .schemas import NFeValidationIssue, NFeValidationReport
 
 logger = get_logger(__name__)
@@ -35,10 +36,7 @@ async def validate_nfe_full(xml_path: str | Path) -> NFeValidationReport:
             # rejeitar nota
             ...
     """
-    path = Path(xml_path)
-    if not path.exists():
-        raise FileNotFoundError(f"Arquivo XML não encontrado: {xml_path}")
-
+    path = validar_caminho_arquivo(xml_path, label="Arquivo XML")
     issues: list[NFeValidationIssue] = []
     xml_content = path.read_bytes()
 
@@ -75,7 +73,7 @@ async def validate_nfe_full(xml_path: str | Path) -> NFeValidationReport:
     if chave_acesso:
         try:
             chave_result = await validar_chave_nfe(chave_acesso)
-            chave_consistente = bool(chave_result.get("válida", False))
+            chave_consistente = bool(chave_result.get("válido", chave_result.get("válida", False)))
             if not chave_consistente:
                 issues.append(
                     NFeValidationIssue(
