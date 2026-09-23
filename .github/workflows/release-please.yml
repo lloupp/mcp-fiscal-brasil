@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   release-please:
+    if: ${{ github.repository == 'DeHor-Labs/mcp-fiscal-brasil' }}
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -25,7 +26,7 @@ jobs:
 
   publish:
     needs: release-please
-    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    if: ${{ github.repository == 'DeHor-Labs/mcp-fiscal-brasil' && needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
     environment: pypi
 
