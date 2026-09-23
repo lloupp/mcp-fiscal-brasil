@@ -26,6 +26,7 @@ from .agentic import (
 )
 from .bcb import _tools as bcb_tools
 from .cep import _tools as cep_tools
+from .capabilities import listar_capacidades_fiscais
 from .certidoes.tools import consultar_certidao_federal, consultar_certidao_fgts
 from .cnae import _tools as cnae_tools
 
@@ -189,6 +190,23 @@ async def tool_listar_fontes_fiscais(dominio: str | None = None) -> list[dict[st
         fonte.model_dump(mode="json", exclude_none=True) for fonte in listar_fontes_fiscais(dominio)
     ]
 
+
+# ---------------------------------------------------------------------------
+# Capabilities do runtime
+# ---------------------------------------------------------------------------
+
+
+@app.tool(
+    name="listar_capacidades_fiscais",
+    description=(
+        "Informa quais capacidades fiscais estão habilitadas nesta instalação sem revelar "
+        "tokens, senhas ou caminhos locais. Use antes de workflows que dependem de A1, "
+        "NFS-e nacional ou provider privado para escolher o fallback correto."
+    ),
+)
+async def tool_listar_capacidades_fiscais() -> dict[str, Any]:
+    """Retorna capabilities do runtime sem dados sensíveis."""
+    return listar_capacidades_fiscais().model_dump(mode="json", exclude_none=True)
 
 # ---------------------------------------------------------------------------
 # CNPJ
