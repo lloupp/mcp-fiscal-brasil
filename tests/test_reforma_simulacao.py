@@ -9,7 +9,9 @@ from __future__ import annotations
 import pytest
 
 from mcp_fiscal_brasil.agentic.reforma import (
+    CBS_REDUCAO_2027_2028_PCT,
     CBS_REFERENCIA_PCT,
+    IBS_2027_2028_PCT,
     IBS_REFERENCIA_PCT,
     SimulacaoReformaResult,
     simular_transicao_reforma_tributaria,
@@ -108,7 +110,7 @@ def test_faturamento_refletido_no_resultado(faturamento_medio: float) -> None:
 
 
 def test_2026_carga_nova_zero_comercio(faturamento_medio: float) -> None:
-    """Em 2026, CBS e IBS sao compensaveis; carga nova deve ser 0."""
+    """Em 2026, CBS 0,9% + IBS 0,1% sao compensados no modelo."""
     resultado = simular_transicao_reforma_tributaria(
         faturamento_anual=faturamento_medio,
         setor="comércio",
@@ -116,6 +118,9 @@ def test_2026_carga_nova_zero_comercio(faturamento_medio: float) -> None:
         aliquota_icms_atual=12.0,
     )
     ano_2026 = next(r for r in resultado.resultados_por_ano if r.ano == 2026)
+    assert ano_2026.cbs_nominal_pct == 0.9
+    assert ano_2026.ibs_nominal_pct == 0.1
+    assert ano_2026.compensacao_transicao_pct == 1.0
     assert ano_2026.carga_regime_novo_pct == 0.0
 
 
@@ -134,11 +139,11 @@ def test_2026_carga_antiga_inclui_pis_cofins_e_icms(faturamento_medio: float) ->
 
 
 # ---------------------------------------------------------------------------
-# 2027-2028: CBS plena, ICMS/ISS integrais
+# 2027-2028: CBS com reducao de 0,1 p.p., IBS 0,1 p.p., ICMS/ISS integrais
 # ---------------------------------------------------------------------------
 
 
-def test_2027_carga_nova_igual_cbs_referencia(faturamento_medio: float) -> None:
+def test_2027_modela_componentes_cbs_e_ibs_vigentes(faturamento_medio: float) -> None:
     resultado = simular_transicao_reforma_tributaria(
         faturamento_anual=faturamento_medio,
         setor="indústria",
@@ -146,7 +151,12 @@ def test_2027_carga_nova_igual_cbs_referencia(faturamento_medio: float) -> None:
         aliquota_icms_atual=12.0,
     )
     ano_2027 = next(r for r in resultado.resultados_por_ano if r.ano == 2027)
-    assert abs(ano_2027.carga_regime_novo_pct - CBS_REFERENCIA_PCT) < 0.01
+    cbs_esperada = CBS_REFERENCIA_PCT - CBS_REDUCAO_2027_2028_PCT
+    assert abs(ano_2027.cbs_nominal_pct - cbs_esperada) < 0.01
+    assert abs(ano_2027.ibs_nominal_pct - IBS_2027_2028_PCT) < 0.01
+    assert abs(
+        ano_2027.carga_regime_novo_pct - (cbs_esperada + IBS_2027_2028_PCT)
+    ) < 0.01
 
 
 def test_2027_carga_antiga_apenas_icms(faturamento_medio: float) -> None:
