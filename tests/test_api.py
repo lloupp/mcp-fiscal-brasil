@@ -317,3 +317,15 @@ def test_cnpj_lookup_rejeita_espacos_mesmo_com_digito_valido() -> None:
         response = client.get("/v1/cnpj/33 000 167 0001 01")
     assert response.status_code == 400
     consultar.assert_not_called()
+
+
+
+def test_capabilities_endpoint_nao_expoe_segredos() -> None:
+    response = client.get("/v1/capabilities")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"]
+    assert isinstance(body["capabilities"], list)
+    serializado = response.text.casefold()
+    assert "nfe_certificado_senha" not in serializado
+    assert "cpfcnpj_token" not in serializado
