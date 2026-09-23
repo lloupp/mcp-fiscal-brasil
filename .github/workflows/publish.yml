@@ -9,6 +9,7 @@ permissions:
 
 jobs:
   build-and-publish:
+    if: ${{ github.repository == 'DeHor-Labs/mcp-fiscal-brasil' }}
     runs-on: ubuntu-latest
     environment: pypi
 
