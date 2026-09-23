@@ -524,8 +524,6 @@ async def tool_validar_assinatura_nfe(
     ),
 )
 async def tool_baixar_nfe_distribuicao(
-    caminho_certificado: str,
-    senha: str,
     cnpj_cpf: str,
     uf: str,
     modo: str = "distNSU",
@@ -537,17 +535,15 @@ async def tool_baixar_nfe_distribuicao(
 ) -> dict[str, Any]:
     """Baixa documentos fiscais via NFeDistribuicaoDFe com mTLS usando certificado A1 local.
 
-    CERTIFICADO LOCAL (opt-in): requer o caminho absoluto para o arquivo .pfx/.p12
-    e a senha. O certificado NUNCA e enviado a qualquer servidor externo. A autenticacao
-    mTLS e feita diretamente entre o cliente e a SEFAZ.
+    CERTIFICADO LOCAL (opt-in): o caminho e a senha sao lidos exclusivamente das
+    configuracoes NFE_CERTIFICADO_PATH/NFE_CERTIFICADO_SENHA do processo. Segredos
+    nunca entram como argumentos da tool nem no contexto do agente.
 
     A Ciencia da Operacao (evento 210200) e pre-requisito para a SEFAZ liberar o
     XML completo (procNFe) ao destinatario. Sem ela, apenas o resNFe (resumo) fica
     disponivel. Use manifestar_nfe() apos obter o resNFe.
 
     Args:
-        caminho_certificado: Caminho absoluto para o arquivo .pfx ou .p12.
-        senha: Senha do certificado. Nunca logada ou incluida em excecoes.
         cnpj_cpf: CNPJ (14 dig) ou CPF (11 dig) do autor da consulta.
         uf: Sigla da UF do autor (ex: "SP") ou codigo IBGE (ex: "35").
         modo: "distNSU" (incremental), "consNSU" (NSU especifico) ou
@@ -562,6 +558,7 @@ async def tool_baixar_nfe_distribuicao(
         dict com ultimo_nsu, max_nsu e documentos (lista com nsu, tipo, schema,
         chave e resumo de cada documento retornado).
     """
+    caminho_certificado, senha = _nfe_credentials_from_settings()
     resultado: DistribuicaoResult = await baixar_nfe_distribuicao(
         caminho_certificado=caminho_certificado,
         senha=senha,
@@ -612,8 +609,6 @@ async def tool_baixar_nfe_distribuicao(
 async def tool_manifestar_nfe(
     chave: str,
     tipo_evento: str,
-    caminho_certificado: str,
-    senha: str,
     cnpj_cpf: str,
     uf: str = "91",
     numero_sequencia: int = 1,
@@ -623,9 +618,9 @@ async def tool_manifestar_nfe(
 ) -> dict[str, Any]:
     """Manifesta o destinatario em uma NF-e via NFeRecepcaoEvento.
 
-    CERTIFICADO LOCAL (opt-in): requer o caminho absoluto para o arquivo .pfx/.p12
-    e a senha. O certificado NUNCA e enviado a qualquer servidor. A assinatura XMLDSig
-    do evento e feita localmente e o XML assinado e enviado diretamente a SEFAZ.
+    CERTIFICADO LOCAL (opt-in): caminho e senha sao carregados das configuracoes
+    NFE_CERTIFICADO_PATH/NFE_CERTIFICADO_SENHA do processo, fora do schema MCP.
+    A assinatura XMLDSig e feita localmente e o XML assinado vai direto a SEFAZ.
 
     Eventos disponiveis:
     - 210200: Ciencia da Operacao (pre-requisito para obter procNFe)
@@ -636,8 +631,6 @@ async def tool_manifestar_nfe(
     Args:
         chave: Chave de acesso de 44 digitos da NF-e.
         tipo_evento: Codigo do evento ("210200", "210210", "210220" ou "210240").
-        caminho_certificado: Caminho absoluto para o arquivo .pfx/.p12.
-        senha: Senha do certificado A1. Nunca logada ou incluida em excecoes.
         cnpj_cpf: CNPJ (14 dig) ou CPF (11 dig) do destinatario.
         uf: UF do autor. Default "91" = AN (Ambiente Nacional) para manifestacao.
         numero_sequencia: Numero sequencial do evento para esta chave (1 a 20).
@@ -649,6 +642,7 @@ async def tool_manifestar_nfe(
         dict com sucesso (bool), chave, tipo_evento, numero_protocolo,
         codigo_retorno e motivo retornados pela SEFAZ.
     """
+    caminho_certificado, senha = _nfe_credentials_from_settings()
     resultado: ManifestacaoResult = await manifestar_nfe(
         chave=chave,
         tipo_evento=tipo_evento,
@@ -1137,8 +1131,9 @@ async def tool_consultar_empresas_lote(
     ),
 )
 async def tool_validate_nfe_full(xml_path: str) -> dict[str, Any]:
-    """Validacao consolidada de NFe."""
-    resultado = await validate_nfe_full(xml_path)
+    """Validacao consolidada de NFe dentro do diretorio permitido."""
+    path = _validated_local_file(xml_path, label="Arquivo XML")
+    resultado = await validate_nfe_full(path)
     return resultado.model_dump(mode="json", exclude_none=True)
 
 
@@ -1151,8 +1146,9 @@ async def tool_validate_nfe_full(xml_path: str) -> dict[str, Any]:
     ),
 )
 async def tool_summarize_sped(file_path: str) -> dict[str, Any]:
-    """Sumarizacao executiva de arquivo SPED."""
-    resultado = await summarize_sped(file_path)
+    """Sumarizacao executiva de SPED dentro do diretorio permitido."""
+    path = _validated_local_file(file_path, label="Arquivo SPED")
+    resultado = await summarize_sped(path)
     return resultado.model_dump(mode="json", exclude_none=True)
 
 
