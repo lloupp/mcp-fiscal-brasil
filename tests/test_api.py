@@ -319,12 +319,16 @@ def test_cnpj_lookup_rejeita_espacos_mesmo_com_digito_valido() -> None:
     consultar.assert_not_called()
 
 
-def test_capabilities_endpoint_nao_expoe_segredos() -> None:
+def test_capabilities_endpoint_nao_expoe_valores_secretos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "nfe_certificado_senha", "segredo-api-teste")
+    monkeypatch.setattr(settings, "cpfcnpj_token", "token-api-teste")
+
     response = client.get("/v1/capabilities")
     assert response.status_code == 200
     body = response.json()
     assert body["version"]
     assert isinstance(body["capabilities"], list)
-    serializado = response.text.casefold()
-    assert "nfe_certificado_senha" not in serializado
-    assert "cpfcnpj_token" not in serializado
+    assert "segredo-api-teste" not in response.text
+    assert "token-api-teste" not in response.text
