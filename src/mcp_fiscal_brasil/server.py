@@ -33,6 +33,7 @@ from .cpf.tools import validar_cpf_tool
 from .empresa import _tools as empresa_tools
 from .esocial.tools import listar_eventos_esocial, validar_evento_esocial
 from .ibge import _tools as ibge_tools
+from .fontes import listar_fontes_fiscais
 from .importacao import _tools as importacao_tools
 from .mei import _tools as mei_tools
 from .nfe.assinatura import AssinaturaResult, validar_assinatura_nfe
@@ -120,6 +121,35 @@ async def health(_request: Request) -> JSONResponse:
     montada, e o healthcheck do container degrada para "pacote importa".
     """
     return JSONResponse({"status": "ok"})
+
+
+# ---------------------------------------------------------------------------
+# Proveniencia das fontes
+# ---------------------------------------------------------------------------
+
+
+@app.tool(
+    name="listar_fontes_fiscais",
+    description=(
+        "Lista as fontes de dados usadas ou suportadas pelo MCP Fiscal Brasil, com tipo "
+        "(oficial, agregador, privada ou local), nivel de confiabilidade, autenticacao, "
+        "dominios cobertos e limitacoes. Use antes de um workflow quando o agente precisa "
+        "decidir se uma evidencia e autoritativa ou apenas operacional."
+    ),
+)
+async def tool_listar_fontes_fiscais(dominio: str | None = None) -> list[dict[str, Any]]:
+    """Retorna o catalogo de proveniencia das fontes fiscais.
+
+    Args:
+        dominio: Filtro opcional, por exemplo "nfe", "cnpj", "sped" ou "simples".
+
+    Returns:
+        Lista de fontes com proveniencia, nivel de confiabilidade e limitacoes.
+    """
+    return [
+        fonte.model_dump(mode="json", exclude_none=True)
+        for fonte in listar_fontes_fiscais(dominio)
+    ]
 
 
 # ---------------------------------------------------------------------------
