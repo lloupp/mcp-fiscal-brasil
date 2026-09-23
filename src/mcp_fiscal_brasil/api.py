@@ -35,6 +35,7 @@ from .agentic import (
     summarize_sped,
     validate_nfe_full,
 )
+from .capabilities import listar_capacidades_fiscais
 from .cep.client import CEPClient
 from .cnpj.tools import consultar_cnpj
 from .cpf.tools import validar_cpf_tool
@@ -120,6 +121,16 @@ def health() -> HealthResponse:
     """Retorna status do serviço."""
     return HealthResponse()
 
+
+# ---------------------------------------------------------------------------
+# Capabilities
+# ---------------------------------------------------------------------------
+
+
+@app.get("/v1/capabilities", tags=["meta"], summary="Capabilities fiscais do runtime")
+def capabilities() -> dict[str, Any]:
+    """Retorna capacidades habilitadas sem expor segredos ou caminhos locais."""
+    return listar_capacidades_fiscais().model_dump(mode="json", exclude_none=True)
 
 # ---------------------------------------------------------------------------
 # CNPJ
