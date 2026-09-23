@@ -154,9 +154,7 @@ def test_2027_modela_componentes_cbs_e_ibs_vigentes(faturamento_medio: float) ->
     cbs_esperada = CBS_REFERENCIA_PCT - CBS_REDUCAO_2027_2028_PCT
     assert abs(ano_2027.cbs_nominal_pct - cbs_esperada) < 0.01
     assert abs(ano_2027.ibs_nominal_pct - IBS_2027_2028_PCT) < 0.01
-    assert abs(
-        ano_2027.carga_regime_novo_pct - (cbs_esperada + IBS_2027_2028_PCT)
-    ) < 0.01
+    assert abs(ano_2027.carga_regime_novo_pct - (cbs_esperada + IBS_2027_2028_PCT)) < 0.01
 
 
 def test_2027_carga_antiga_apenas_icms(faturamento_medio: float) -> None:
