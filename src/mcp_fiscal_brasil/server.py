@@ -74,9 +74,7 @@ def _validated_local_file(path_value: str, *, label: str) -> Path:
     try:
         file_path.relative_to(base_dir)
     except ValueError as exc:
-        raise ValueError(
-            f"{label} fora do diretório permitido: {base_dir}"
-        ) from exc
+        raise ValueError(f"{label} fora do diretório permitido: {base_dir}") from exc
 
     if not file_path.exists():
         raise ValueError(f"{label} não encontrado")
