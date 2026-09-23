@@ -84,7 +84,9 @@ _FONTES: tuple[FonteFiscal, ...] = (
         dominios=["cnpj"],
         autenticacao="Conforme plano/limites do provedor.",
         uso_recomendado="Fallback cadastral, nunca como autoridade juridica.",
-        limitacoes=["Servico privado de terceiros; disponibilidade e atualizacao nao sao controladas pelo projeto."],
+        limitacoes=[
+            "Servico privado de terceiros; disponibilidade e atualizacao nao sao controladas pelo projeto."
+        ],
     ),
     FonteFiscal(
         id="cpfcnpj",
