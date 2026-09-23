@@ -691,9 +691,9 @@ async def tool_manifestar_nfe(
 @app.tool(
     name="consultar_nfse",
     description=(
-        "Consulta dados de uma NFSe (Nota Fiscal de Serviço Eletrônica). "
-        "ATENÇÃO: NFSe não possui padrão nacional - cada município tem seu próprio sistema. "
-        "Esta ferramenta orienta sobre como acessar o portal correto do município."
+        "Consulta NFS-e tentando primeiro o Ambiente de Dados Nacional (ADN) com mTLS/A1 "
+        "quando configurado. Quando o documento/município não estiver coberto ou a API "
+        "autenticada não puder ser usada, retorna fallback municipal explícito."
     ),
 )
 async def tool_consultar_nfse(
@@ -702,11 +702,11 @@ async def tool_consultar_nfse(
     uf: str,
     cnpj_prestador: str | None = None,
 ) -> dict[str, str]:
-    """Orienta a consulta de uma NFS-e (Nota Fiscal de Servicos eletronica) por municipio.
+    """Consulta NFS-e pelo padrão nacional quando possível, com fallback municipal.
 
-    A NFS-e e municipal e nao tem padrao nacional unico, entao esta ferramenta retorna o portal
-    da prefeitura, o tipo de sistema (ABRASF, ISS.net etc.) e alternativas de integracao, em vez
-    de buscar os dados da nota diretamente.
+    O Sistema Nacional NFS-e coexiste com soluções municipais. A implementação tenta
+    primeiro a ADN autenticada por ICP-Brasil/mTLS e preserva o motivo do fallback quando
+    precisa orientar consulta municipal.
 
     Args:
         numero: Numero da NFS-e.
