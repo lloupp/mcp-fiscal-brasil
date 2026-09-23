@@ -38,6 +38,12 @@ class Settings(BaseSettings):
     nfe_emitente_cnpj: str = ""
     nfe_ambiente: str = "producao"
 
+    # Certificado A1 para a API Nacional NFS-e (ADN). Pode apontar para o mesmo
+    # arquivo usado pela NF-e, mas fica separado para permitir identidades/deploys
+    # independentes. Nunca persista a senha em arquivos versionados.
+    nfse_certificado_path: str = ""
+    nfse_certificado_senha: str = ""
+
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8")
 
     @field_validator("cpfcnpj_base_url")
