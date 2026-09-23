@@ -1,10 +1,13 @@
-"""NFe lookup client backed by BrasilAPI and the National NFe Portal.
+"""Cliente de consulta de NF-e/NFC-e por chave.
 
-Quando o provedor premium opcional cpfcnpj.com.br esta configurado (token via
-``CPFCNPJ_TOKEN``), ele e tentado primeiro na consulta por chave, cobrindo NF-e
-(modelo 55, pacote 100) e NFC-e (modelo 65, pacote 102) com dados oficiais em
-tempo real. As fontes gratuitas seguem como fallback. Sem token, o comportamento
-e identico ao anterior.
+Uma chave de acesso permite validar e extrair metadados localmente, mas a consulta
+publica do Portal Nacional e protegida por CAPTCHA e nao e uma API para automacao.
+Dados completos exigem um provedor autorizado ou o servico oficial
+NFeDistribuicaoDFe com certificado A1 (exposto em `nfe.distribuicao`).
+
+Quando o provedor premium opcional cpfcnpj.com.br esta configurado via
+``CPFCNPJ_TOKEN``, ele pode retornar dados completos. Sem provedor autorizado,
+esta classe devolve apenas os campos deterministicamente codificados na chave.
 """
 
 import re
@@ -126,13 +129,15 @@ class NFEClient:
 
     async def consultar_por_chave(self, chave: str) -> NFeResponse:
         """
-        Look up NFe data by its 44 digit access key.
+        Consulta uma NF-e/NFC-e por chave sem contornar mecanismos anti-automacao.
 
-        Fallback chain:
-          0. cpfcnpj.com.br premium provider, only when a token is configured
-          1. BrasilAPI, with partial state coverage
-          2. National NFe Portal, public lookup without authentication
-          3. Partial fields extracted from the access key itself
+        Cadeia de confiabilidade:
+          1. cpfcnpj.com.br, somente quando o token opcional esta configurado;
+          2. metadados determinísticos extraidos da propria chave.
+
+        Para obter XML oficial, use `baixar_nfe_distribuicao` com certificado A1.
+        O Portal Nacional de consulta publica exige CAPTCHA e, portanto, nao e usado
+        como backend automatizado. A BrasilAPI tambem nao expoe endpoint NFe/NFCe.
         """
         logger.info("nfe_lookup_started", chave_prefix=chave[:10])
 
@@ -146,50 +151,11 @@ class NFEClient:
                     "nfe_lookup_cpfcnpj_failed",
                     chave_prefix=chave[:10],
                     error=str(exc),
-                    fallback="brasilapi",
+                    fallback="partial_access_key_data",
                 )
 
-        try:
-            resultado = await self._consultar_brasil_api(chave)
-            logger.info("nfe_lookup_brasilapi_success", chave_prefix=chave[:10])
-            return resultado
-        except FiscalRateLimitError as exc:
-            logger.warning(
-                "nfe_lookup_brasilapi_rate_limited",
-                chave_prefix=chave[:10],
-                error=str(exc),
-                fallback="portal_nfe",
-            )
-        except FiscalHTTPError as exc:
-            logger.warning(
-                "nfe_lookup_brasilapi_http_failed",
-                chave_prefix=chave[:10],
-                status_code=exc.status_code,
-                error=str(exc),
-                fallback="portal_nfe",
-            )
-        except Exception as exc:
-            logger.warning(
-                "nfe_lookup_brasilapi_unexpected_failed",
-                chave_prefix=chave[:10],
-                error=str(exc),
-                fallback="portal_nfe",
-            )
-
-        try:
-            resultado = await self._consultar_portal_nfe(chave)
-            logger.info("nfe_lookup_portal_success", chave_prefix=chave[:10])
-            return resultado
-        except Exception as exc:
-            logger.warning(
-                "nfe_lookup_portal_failed",
-                chave_prefix=chave[:10],
-                error=str(exc),
-                fallback="partial_access_key_data",
-            )
-
         logger.info(
-            "nfe_lookup_all_sources_failed",
+            "nfe_lookup_without_authorized_provider",
             chave_prefix=chave[:10],
             fallback="partial_access_key_data",
         )
@@ -364,8 +330,8 @@ class NFEClient:
             informacoes_adicionais=(
                 f"UF de emissão: {info['uf']}. "
                 f"Emissão: {info['ano_mes']}. "
-                "Dados completos indisponíveis: BrasilAPI sem cobertura para este estado "
-                "e Portal NFe inacessível no momento."
+                "Dados completos exigem provedor autorizado ou NFeDistribuicaoDFe com "
+                "certificado A1; a consulta publica do Portal Nacional exige CAPTCHA."
             ),
         )
 
