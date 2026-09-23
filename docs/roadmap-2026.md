@@ -10,7 +10,7 @@ A base cobre 45 tools após a inclusão do catálogo de fontes, com MCP, SDK Pyt
 - [x] parar de tratar consulta pública NF-e com CAPTCHA como API automatizada;
 - [x] expor catálogo de proveniência para agentes;
 - [x] remover vulnerabilidade conhecida de GitPython no lockfile;
-- [ ] conectar NFS-e nacional com certificado/mTLS configurável de ponta a ponta;
+- [x] conectar NFS-e nacional com certificado/mTLS configurável de ponta a ponta;
 - [ ] versionar tabelas locais com `valid_from`, `valid_to` e fonte legal;
 - [ ] rebaixar `risk_score_supplier` para triagem assistiva e exigir evidência adicional antes de qualquer decisão;
 - [ ] substituir `compare_tax_regimes` por um motor de cenários parametrizado, sem “melhor regime” automático;
