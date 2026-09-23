@@ -135,8 +135,4 @@ def listar_fontes_fiscais(dominio: str | None = None) -> list[FonteFiscal]:
         return list(_FONTES)
 
     alvo = dominio.strip().casefold()
-    return [
-        fonte
-        for fonte in _FONTES
-        if any(alvo == item.casefold() for item in fonte.dominios)
-    ]
+    return [fonte for fonte in _FONTES if any(alvo == item.casefold() for item in fonte.dominios)]
