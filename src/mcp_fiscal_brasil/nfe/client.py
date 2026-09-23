@@ -16,7 +16,6 @@ from typing import Any, cast
 
 from mcp_fiscal_brasil._core import (
     FiscalHTTPError,
-    FiscalRateLimitError,
     HTTPClient,
     get_logger,
     settings,
