@@ -11,14 +11,19 @@ def _by_id():
     return {item.id: item for item in report.capabilities}
 
 
-def test_capabilities_basicas_disponiveis_sem_segredos() -> None:
+def test_capabilities_basicas_disponiveis_sem_valores_secretos(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(settings, "nfe_certificado_senha", "segredo-capability-teste")
+    monkeypatch.setattr(settings, "cpfcnpj_token", "token-capability-teste")
+
     data = listar_capacidades_fiscais().model_dump(mode="json")
     serializado = json.dumps(data)
 
     assert _by_id()["nfe_key_validation"].available is True
     assert _by_id()["sped_analysis"].available is True
-    assert "senha" not in serializado.casefold()
-    assert settings.cpfcnpj_token not in serializado if settings.cpfcnpj_token else True
+    assert "segredo-capability-teste" not in serializado
+    assert "token-capability-teste" not in serializado
 
 
 def test_nfe_distribution_reflete_configuracao_a1(
