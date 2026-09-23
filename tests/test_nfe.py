@@ -164,86 +164,61 @@ class TestExtrairInfoChave:
 
 
 class TestNFEClientFallback:
-    """Testa a cadeia de fallback do NFEClient sem realizar chamadas HTTP reais."""
+    """Testa a consulta por chave sem depender de scraping de consulta publica."""
 
-    async def test_brasil_api_sucesso_nao_chama_portal(self) -> None:
+    async def test_sem_provedor_retorna_metadados_parciais(self) -> None:
         chave = _chave_valida_sp()
         client = NFEClient()
 
-        from mcp_fiscal_brasil.nfe.schemas import NFeResponse
-
-        mock_resp = NFeResponse(chave_acesso=chave, número="1", serie="1", situacao="Autorizada")
-
-        with patch.object(client, "_consultar_brasil_api", new=AsyncMock(return_value=mock_resp)):
-            with patch.object(client, "_consultar_portal_nfe", new=AsyncMock()) as portal_mock:
-                resultado = await client.consultar_por_chave(chave)
-
-        assert resultado.situacao == "Autorizada"
-        portal_mock.assert_not_called()
-
-    async def test_brasil_api_rate_limit_cai_no_portal(self) -> None:
-        chave = _chave_valida_sp()
-        client = NFEClient()
-
-        from mcp_fiscal_brasil.nfe.schemas import NFeResponse
-
-        mock_resp = NFeResponse(chave_acesso=chave, número="1", serie="1", situacao="Autorizada")
-
-        with patch.object(
-            client,
-            "_consultar_brasil_api",
-            new=AsyncMock(side_effect=RateLimitError(endpoint="brasilapi/nfe")),
+        with patch(
+            "mcp_fiscal_brasil.nfe.client.cpfcnpj_provider.provedor_configurado",
+            return_value=False,
         ):
-            with patch.object(
-                client, "_consultar_portal_nfe", new=AsyncMock(return_value=mock_resp)
-            ) as portal_mock:
-                resultado = await client.consultar_por_chave(chave)
-
-        portal_mock.assert_called_once_with(chave)
-        assert resultado.situacao == "Autorizada"
-
-    async def test_brasil_api_erro_cai_no_portal(self) -> None:
-        chave = _chave_valida_sp()
-        client = NFEClient()
-
-        from mcp_fiscal_brasil.nfe.schemas import NFeResponse
-
-        mock_resp = NFeResponse(chave_acesso=chave, número="1", serie="1", situacao="Autorizada")
-
-        with patch.object(
-            client,
-            "_consultar_brasil_api",
-            new=AsyncMock(side_effect=APIError(message="não encontrado", status_code=404)),
-        ):
-            with patch.object(
-                client, "_consultar_portal_nfe", new=AsyncMock(return_value=mock_resp)
-            ):
-                resultado = await client.consultar_por_chave(chave)
-
-        assert resultado.situacao == "Autorizada"
-
-    async def test_todas_apis_falham_retorna_parcial(self) -> None:
-        chave = _chave_valida_sp()
-        client = NFEClient()
-
-        with patch.object(
-            client,
-            "_consultar_brasil_api",
-            new=AsyncMock(side_effect=APIError(message="indisponivel", status_code=503)),
-        ):
-            with patch.object(
-                client,
-                "_consultar_portal_nfe",
-                new=AsyncMock(side_effect=APIError(message="indisponivel", status_code=503)),
-            ):
-                resultado = await client.consultar_por_chave(chave)
+            resultado = await client.consultar_por_chave(chave)
 
         assert resultado.chave_acesso == chave
         assert resultado.emitente is not None
         assert resultado.emitente.cnpj == "12345678901234"
         assert "parciais" in (resultado.situacao or "").lower()
         assert resultado.informacoes_adicionais is not None
-        assert "SP" in resultado.informacoes_adicionais
+        assert "NFeDistribuicaoDFe" in resultado.informacoes_adicionais
+
+    async def test_provedor_configurado_retorna_dados_completos(self) -> None:
+        chave = _chave_valida_sp()
+        client = NFEClient()
+
+        from mcp_fiscal_brasil.nfe.schemas import NFeResponse
+
+        mock_resp = NFeResponse(chave_acesso=chave, número="1", serie="1", situacao="Autorizada")
+        with patch(
+            "mcp_fiscal_brasil.nfe.client.cpfcnpj_provider.provedor_configurado",
+            return_value=True,
+        ):
+            with patch.object(
+                client, "_consultar_cpfcnpj", new=AsyncMock(return_value=mock_resp)
+            ) as provider_mock:
+                resultado = await client.consultar_por_chave(chave)
+
+        provider_mock.assert_awaited_once_with(chave)
+        assert resultado.situacao == "Autorizada"
+
+    async def test_falha_do_provedor_degrada_para_metadados_parciais(self) -> None:
+        chave = _chave_valida_sp()
+        client = NFEClient()
+
+        with patch(
+            "mcp_fiscal_brasil.nfe.client.cpfcnpj_provider.provedor_configurado",
+            return_value=True,
+        ):
+            with patch.object(
+                client,
+                "_consultar_cpfcnpj",
+                new=AsyncMock(side_effect=APIError(message="indisponivel", status_code=503)),
+            ):
+                resultado = await client.consultar_por_chave(chave)
+
+        assert resultado.chave_acesso == chave
+        assert "parciais" in (resultado.situacao or "").lower()
 
     async def test_chave_invalida_levanta_validation_error(self) -> None:
         with pytest.raises(ValidationError) as exc_info:
