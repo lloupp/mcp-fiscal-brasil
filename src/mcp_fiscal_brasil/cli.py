@@ -35,6 +35,7 @@ from .agentic import (
     compare_tax_regimes,
     risk_score_supplier,
 )
+from .capabilities import listar_capacidades_fiscais
 from .cep.client import CEPClient
 from .cnpj.tools import consultar_cnpj
 from .cpf.tools import validar_cpf_tool
@@ -119,6 +120,13 @@ def version() -> None:
     """Exibe versão do pacote."""
     typer.echo(f"mcp-fiscal-brasil {__version__}")
 
+
+@app.command()
+def capabilities(
+    as_json: bool = typer.Option(False, "--json", help="Saida em JSON puro"),
+) -> None:
+    """Lista capabilities fiscais habilitadas neste runtime."""
+    _print(listar_capacidades_fiscais(), as_json)
 
 @app.command()
 def cnpj(
