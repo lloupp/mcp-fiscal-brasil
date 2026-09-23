@@ -319,7 +319,6 @@ def test_cnpj_lookup_rejeita_espacos_mesmo_com_digito_valido() -> None:
     consultar.assert_not_called()
 
 
-
 def test_capabilities_endpoint_nao_expoe_segredos() -> None:
     response = client.get("/v1/capabilities")
     assert response.status_code == 200
