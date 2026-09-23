@@ -215,8 +215,7 @@ def _nota_para_ano(ano: int, regime_atual: str) -> str:
             )
         ),
         2028: (
-            "CBS segue com reducao de 0,1 p.p. e IBS a 0,1 p.p.; "
-            "ICMS e ISS permanecem integrais."
+            "CBS segue com reducao de 0,1 p.p. e IBS a 0,1 p.p.; ICMS e ISS permanecem integrais."
         ),
         2029: (
             "Inicio da reducao do ICMS/ISS: tributos estaduais/municipais recuam "
