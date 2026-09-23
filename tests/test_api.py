@@ -322,8 +322,8 @@ def test_cnpj_lookup_rejeita_espacos_mesmo_com_digito_valido() -> None:
 def test_capabilities_endpoint_nao_expoe_valores_secretos(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(settings, "nfe_certificado_senha", "segredo-api-teste")
-    monkeypatch.setattr(settings, "cpfcnpj_token", "token-api-teste")
+    monkeypatch.setattr(api_settings, "nfe_certificado_senha", "segredo-api-teste")
+    monkeypatch.setattr(api_settings, "cpfcnpj_token", "token-api-teste")
 
     response = client.get("/v1/capabilities")
     assert response.status_code == 200
