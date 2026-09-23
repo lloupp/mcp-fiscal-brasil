@@ -32,8 +32,8 @@ from .cnpj.tools import consultar_cnpj, listar_cnpjs_por_nome
 from .cpf.tools import validar_cpf_tool
 from .empresa import _tools as empresa_tools
 from .esocial.tools import listar_eventos_esocial, validar_evento_esocial
-from .ibge import _tools as ibge_tools
 from .fontes import listar_fontes_fiscais
+from .ibge import _tools as ibge_tools
 from .importacao import _tools as importacao_tools
 from .mei import _tools as mei_tools
 from .nfe.assinatura import AssinaturaResult, validar_assinatura_nfe
