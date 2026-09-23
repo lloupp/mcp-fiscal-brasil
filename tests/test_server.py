@@ -32,7 +32,6 @@ def test_health_route_disponivel_no_transporte_http() -> None:
     assert response.json() == {"status": "ok"}
 
 
-
 def test_tools_sefaz_nao_expoem_segredos_no_schema_python() -> None:
     """Senha/caminho do A1 devem vir do processo, não do contexto do agente."""
     baixar = inspect.signature(tool_baixar_nfe_distribuicao)
