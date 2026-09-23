@@ -132,6 +132,7 @@ def capabilities() -> dict[str, Any]:
     """Retorna capacidades habilitadas sem expor segredos ou caminhos locais."""
     return listar_capacidades_fiscais().model_dump(mode="json", exclude_none=True)
 
+
 # ---------------------------------------------------------------------------
 # CNPJ
 # ---------------------------------------------------------------------------
