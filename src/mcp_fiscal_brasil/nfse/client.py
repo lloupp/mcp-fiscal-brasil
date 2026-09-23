@@ -66,10 +66,38 @@ class NFSeNacionalClient:
     - Respostas 404 nao contam como falha de disponibilidade.
     """
 
-    def __init__(self, base_url: str = _BASE_URL) -> None:
+    def __init__(
+        self,
+        base_url: str = _BASE_URL,
+        ssl_context: ssl.SSLContext | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         # Referência ao singleton de módulo: estado persiste entre chamadas MCP.
         self.circuit_breaker = _circuit_breaker
+        self._ssl_context = ssl_context
+
+    async def _obter_ssl_context(self) -> ssl.SSLContext:
+        """Cria contexto mTLS a partir do A1 configurado, sem expor credenciais."""
+        if self._ssl_context is not None:
+            return self._ssl_context
+
+        caminho = settings.nfse_certificado_path or settings.nfe_certificado_path
+        senha = settings.nfse_certificado_senha or settings.nfe_certificado_senha
+        if not caminho or not senha:
+            raise NFSeNacionalUnavailableError(
+                "certificado ICP-Brasil A1 nao configurado para a API Nacional NFS-e"
+            )
+
+        chave_pem, cert_pem, chain_pem = await asyncio.to_thread(
+            carregar_pkcs12, caminho, senha
+        )
+        self._ssl_context = await asyncio.to_thread(
+            criar_ssl_context_em_memoria,
+            chave_pem,
+            cert_pem,
+            chain_pem,
+        )
+        return self._ssl_context
 
     async def _get(self, path: str) -> dict[str, Any] | None:
         """
