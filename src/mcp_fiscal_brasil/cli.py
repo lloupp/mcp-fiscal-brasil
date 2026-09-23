@@ -128,6 +128,7 @@ def capabilities(
     """Lista capabilities fiscais habilitadas neste runtime."""
     _print(listar_capacidades_fiscais(), as_json)
 
+
 @app.command()
 def cnpj(
     número: str = typer.Argument(..., help="CNPJ com ou sem formatacao"),
