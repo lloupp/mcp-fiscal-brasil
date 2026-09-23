@@ -6,6 +6,7 @@ Registra todas as ferramentas fiscais e expõe via protocolo MCP (Model Context 
 
 import logging
 import unicodedata
+from pathlib import Path
 from typing import Any, Literal
 
 from fastmcp import FastMCP
@@ -13,6 +14,7 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from . import __version__
+from ._core.config import settings
 from .agentic import (
     analyze_cnpj_compliance,
     compare_tax_regimes,
@@ -61,6 +63,43 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name
 logger = logging.getLogger(__name__)
 
 MAX_CNPJS_POR_LOTE = 50
+
+
+def _validated_local_file(path_value: str, *, label: str) -> Path:
+    """Restringe leitura de arquivos ao diretório explicitamente permitido."""
+    base_dir = Path(settings.mcp_fiscal_file_base_dir).expanduser().resolve()
+    file_path = Path(path_value).expanduser().resolve()
+
+    try:
+        file_path.relative_to(base_dir)
+    except ValueError as exc:
+        raise ValueError(
+            f"{label} fora do diretório permitido: {base_dir}"
+        ) from exc
+
+    if not file_path.exists():
+        raise ValueError(f"{label} não encontrado")
+    if not file_path.is_file():
+        raise ValueError(f"{label} não é um arquivo")
+    return file_path
+
+
+def _nfe_credentials_from_settings() -> tuple[str, str]:
+    """Obtém A1 apenas de configuração do processo, nunca de argumentos da tool."""
+    caminho = settings.nfe_certificado_path.strip()
+    senha = settings.nfe_certificado_senha
+    if not caminho or not senha:
+        raise ValueError(
+            "Certificado NF-e não configurado. Defina NFE_CERTIFICADO_PATH e "
+            "NFE_CERTIFICADO_SENHA no ambiente/secret do servidor."
+        )
+
+    cert_path = Path(caminho).expanduser().resolve()
+    if not cert_path.is_file():
+        raise ValueError("NFE_CERTIFICADO_PATH não aponta para um arquivo")
+    if cert_path.suffix.lower() not in {".pfx", ".p12"}:
+        raise ValueError("NFE_CERTIFICADO_PATH deve apontar para um arquivo .pfx ou .p12")
+    return str(cert_path), senha
 
 
 def _validar_cnpj_ou_erro(cnpj: str) -> None:
