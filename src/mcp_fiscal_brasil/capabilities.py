@@ -56,7 +56,9 @@ def listar_capacidades_fiscais() -> FiscalCapabilitiesReport:
             id="cnpj_lookup",
             available=True,
             mode="hybrid" if provider else "public_api",
-            source_ids=["cpfcnpj", "brasilapi", "receitaws"] if provider else ["brasilapi", "receitaws"],
+            source_ids=["cpfcnpj", "brasilapi", "receitaws"]
+            if provider
+            else ["brasilapi", "receitaws"],
             fallback="ReceitaWS após falha da BrasilAPI; provider privado somente quando configurado.",
         ),
         FiscalCapability(
