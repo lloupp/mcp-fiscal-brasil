@@ -23,7 +23,6 @@ from mcp_fiscal_brasil.nfe.tools import (
 )
 from mcp_fiscal_brasil.shared.exceptions import (
     APIError,
-    RateLimitError,
     ValidationError,
 )
 
