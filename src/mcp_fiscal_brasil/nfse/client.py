@@ -88,9 +88,7 @@ class NFSeNacionalClient:
                 "certificado ICP-Brasil A1 nao configurado para a API Nacional NFS-e"
             )
 
-        chave_pem, cert_pem, chain_pem = await asyncio.to_thread(
-            carregar_pkcs12, caminho, senha
-        )
+        chave_pem, cert_pem, chain_pem = await asyncio.to_thread(carregar_pkcs12, caminho, senha)
         self._ssl_context = await asyncio.to_thread(
             criar_ssl_context_em_memoria,
             chave_pem,
