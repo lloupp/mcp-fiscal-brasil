@@ -58,9 +58,10 @@ async def consultar_nfse(
     """
     Consulta dados de uma NFSe (Nota Fiscal de Serviço Eletrônica).
 
-    IMPORTANTE: NFSe não possui padrão nacional. Cada município tem seu próprio
-    sistema (ABRASF, ISS.net, Betha, Curitiba, etc.). Esta ferramenta fornece
-    orientações sobre como consultar a NFSe no município informado.
+    A NFS-e possui padrão e APIs nacionais, mas ainda coexiste com sistemas
+    municipais. A ferramenta tenta primeiro o Ambiente de Dados Nacional (ADN)
+    com certificado ICP-Brasil/mTLS configurado e, quando não há cobertura ou
+    autenticação disponível, devolve orientação explícita para consulta municipal.
 
     Args:
         numero: Número da NFSe
@@ -266,8 +267,8 @@ async def consultar_nfse(
         "status": "consulta_manual_necessaria",
         "api_nacional_motivo": api_fallback_motivo,
         "motivo": (
-            "NFSe não possui API pública padronizada nacional. "
-            "Cada município gerencia seu próprio sistema de emissão e consulta."
+            "Existe API Nacional NFS-e autenticada, mas a cobertura/permissão pode "
+            "variar; este caso requer consulta municipal/manual."
         ),
         "portal_municipio": portal_info.get(
             "portal", f"Acesse o portal da prefeitura de {municipio}/{uf_upper}"
