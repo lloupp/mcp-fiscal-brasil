@@ -44,7 +44,7 @@ from .simples.client import SimplesClient
 
 app = typer.Typer(
     name="mcp-fiscal-brasil",
-    help="CLI fiscal brasileiro: CNPJ, CPF, Simples, NFe, SPED e mais.",
+    help="CLI fiscal brasileiro para consultas, triagem e descoberta de capacidades.",
     no_args_is_help=True,
     add_completion=False,
     pretty_exceptions_enable=False,
