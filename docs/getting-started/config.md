@@ -82,7 +82,7 @@ Adicione em `claude_desktop_config.json`:
     }
     ```
 
-Reinicie o Claude Desktop. O servidor aparece como `fiscal-brasil` com 46 ferramentas.
+Reinicie o Claude Desktop. O servidor aparece como `fiscal-brasil` com 47 ferramentas.
 
 ### Claude Code (CLI)
 
