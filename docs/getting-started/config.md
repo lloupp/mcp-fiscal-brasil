@@ -13,6 +13,7 @@ Todas opcionais, com defaults razoaveis.
 | `MCP_FISCAL_CACHE_BACKEND` | `memory` | `memory`, `sqlite` ou `redis` |
 | `MCP_FISCAL_REDIS_URL` | - | URL do Redis (se `cache_backend=redis`) |
 | `MCP_FISCAL_LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `MCP_FISCAL_FILE_BASE_DIR` | `~/.local/share/mcp-fiscal-brasil/files` | Diretório único que tools MCP podem ler por caminho |
 | `NFE_CERTIFICADO_PATH` | - | Certificado A1 para webservices SEFAZ |
 | `NFE_CERTIFICADO_SENHA` | - | Credencial do A1; use secret manager em produção |
 | `NFSE_CERTIFICADO_PATH` | fallback NFe | A1 para API Nacional NFS-e (ADN) |
@@ -33,11 +34,17 @@ MCP_FISCAL_LOG_LEVEL=DEBUG
 # NFSE_CERTIFICADO_SENHA=<secret>
 ```
 
-!!! warning "Certificados e credenciais"
+!!! warning "Certificados, credenciais e arquivos locais"
 
     Não versione arquivos A1 nem credenciais. Em produção, monte o certificado por volume
-    seguro e injete a credencial pelo secret manager. Se `NFSE_CERTIFICADO_*` não estiver
-    definido, o cliente nacional de NFS-e reutiliza `NFE_CERTIFICADO_*` quando disponível.
+    seguro e injete a credencial pelo secret manager. As tools MCP de distribuição/manifestação
+    **não recebem senha nem caminho do A1 como argumentos**: usam apenas `NFE_CERTIFICADO_*`
+    do processo. Se `NFSE_CERTIFICADO_*` não estiver definido, o cliente nacional de NFS-e
+    reutiliza `NFE_CERTIFICADO_*` quando disponível.
+
+    Tools que recebem caminho de XML/SPED só podem ler arquivos sob
+    `MCP_FISCAL_FILE_BASE_DIR`. Isso evita que um agente use a tool como leitor arbitrário
+    do filesystem do host.
 
 ## Cliente MCP
 
