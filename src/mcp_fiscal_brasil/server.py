@@ -206,6 +206,7 @@ async def tool_listar_capacidades_fiscais() -> dict[str, Any]:
     """Retorna capabilities do runtime sem dados sensíveis."""
     return listar_capacidades_fiscais().model_dump(mode="json", exclude_none=True)
 
+
 # ---------------------------------------------------------------------------
 # CNPJ
 # ---------------------------------------------------------------------------
