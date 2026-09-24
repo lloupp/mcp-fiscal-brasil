@@ -58,6 +58,7 @@ jobs:
           path: site/
 
   deploy:
+    if: ${{ github.repository == 'DeHor-Labs/mcp-fiscal-brasil' }}
     needs: build
     runs-on: ubuntu-latest
     environment:
