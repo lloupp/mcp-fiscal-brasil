@@ -15,7 +15,12 @@ logger = get_logger(__name__)
 
 
 class SimplesClient:
-    """Cliente para consulta do Simples Nacional via BrasilAPI."""
+    """Consulta indicadores do Simples Nacional e MEI expostos no endpoint CNPJ da BrasilAPI.
+
+    A BrasilAPI não possui um endpoint `/simples/v1`. Os campos de opção pelo
+    Simples/MEI fazem parte de `/cnpj/v1/{cnpj}`, que agrega dados públicos.
+    A BrasilAPI é uma fonte comunitária/derivada, não a autoridade fiscal.
+    """
 
     def _http_client(self) -> HTTPClient:
         return HTTPClient(
@@ -35,52 +40,33 @@ class SimplesClient:
             return None
 
     async def get_simples_status(self, cnpj: str) -> SimplesStatus:
-        """Consulta o status do Simples Nacional e MEI para um CNPJ."""
+        """Consulta os indicadores de Simples Nacional/MEI presentes no cadastro CNPJ."""
         cnpj_clean = normalizar_cnpj(cnpj)
         if not validate_cnpj_qualquer(cnpj_clean):
-            # A BrasilAPI responde 404 tanto pra CNPJ inexistente quanto pra CNPJ
-            # valido sem opcao pelo Simples/MEI, entao so da pra distinguir
-            # "invalido de fato" validando o digito verificador localmente,
-            # antes de bater na API.
             raise FiscalNotFoundError("CNPJ inválido", "CNPJ", cnpj_clean)
 
         logger.info("simples_status_started", cnpj=cnpj_clean)
         async with self._http_client() as client:
             try:
-                data = await client.get(f"/simples/v1/{cnpj_clean}")
+                data = await client.get(f"/cnpj/v1/{cnpj_clean}")
             except FiscalHTTPError as exc:
                 if exc.status_code == 404:
-                    # Nao optante pelo Simples/MEI (ou sem dados pro CNPJ):
-                    # nao e erro, e um resultado negativo legitimo.
-                    logger.warning("simples_status_nao_confirmado", cnpj=cnpj_clean)
-                    return SimplesStatus(
-                        cnpj=cnpj_clean,
-                        simples_nacional=False,
-                        mei=False,
-                        fonte_confirmada=False,
-                    )
+                    raise FiscalNotFoundError(
+                        "CNPJ não encontrado na fonte cadastral", "CNPJ", cnpj_clean
+                    ) from exc
                 raise
 
-        # A BrasilAPI retorna {"simples": {...}, "simei": {...}}
-        # ou dados na raiz dependendo da versão, tratamos ambas.
-        simples = data.get("simples") if isinstance(data.get("simples"), dict) else data
-        simei = data.get("simei") if isinstance(data.get("simei"), dict) else data
-
-        if not isinstance(simples, dict):
-            simples = {}
-        if not isinstance(simei, dict):
-            simei = {}
+        simples_raw = data.get("opcao_pelo_simples")
+        mei_raw = data.get("opcao_pelo_mei")
+        fonte_confirmada = simples_raw is not None or mei_raw is not None
 
         return SimplesStatus(
             cnpj=cnpj_clean,
-            simples_nacional=simples.get("optante", data.get("simples_nacional", False)),
-            data_opcao=self._parse_date(simples.get("data_opcao", data.get("data_opcao_simples"))),
-            data_exclusao=self._parse_date(
-                simples.get("data_exclusao", data.get("data_exclusao_simples"))
-            ),
-            mei=simei.get("optante", data.get("mei", False)),
-            data_opcao_mei=self._parse_date(simei.get("data_opcao", data.get("data_opcao_simei"))),
-            data_exclusao_mei=self._parse_date(
-                simei.get("data_exclusao", data.get("data_exclusao_simei"))
-            ),
+            simples_nacional=bool(simples_raw) if simples_raw is not None else False,
+            data_opcao=self._parse_date(data.get("data_opcao_pelo_simples")),
+            data_exclusao=self._parse_date(data.get("data_exclusao_do_simples")),
+            mei=bool(mei_raw) if mei_raw is not None else False,
+            data_opcao_mei=self._parse_date(data.get("data_opcao_pelo_mei")),
+            data_exclusao_mei=self._parse_date(data.get("data_exclusao_do_mei")),
+            fonte_confirmada=fonte_confirmada,
         )
